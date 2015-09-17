@@ -42,7 +42,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.19';
+my $_version = '2.1.20';
 
 my %options = (
 	"--debug|d"              =>     \$debug,
@@ -138,6 +138,7 @@ my $aclprefix='LMS';	# przefix dodawany do wpisów generowanych automatycznie, pr
 my $tariff_mult=1;	# mno¿nik uploadu i downloadu, dobrze ustawiæ >1, by MT nie traci³ mocy CPU na zarz±dzanie pasmem, gdy u¿ytkownik osi±ga warto¶æ graniczn± taryfy
 my $macs_usunac='do_pominiecia-';	# ignoruj urz±dzenia z tym prefixem w polu name, najczê¶ciej to sprzêt sieciowy, którego nie trzeba ograniczaæ
 my $api_delay=0;	# czas (w sekundach) oczekiwania po zmianie/dokonaniu wpisu
+
 my $acl_enable=0; 	# czy zarzadzac accesslista
 my $queue_enable=1; 	# czy zarzadzac kolejkami
 my $dhcp_enable=1;	# czy zarzadzac dhcp
@@ -155,7 +156,7 @@ my $macs_signal_range='-120..120';
 my $macs_private_pre_shared_key='';
 my $macs_private_key='';
 
-#domy¶lne ustawienia regu³ki simple queue
+#domyslne ustawienia regulki simple queue
 my $simple_burst_limit= '0/0';
 my $simple_burst_threshold= '0/0';
 my $simple_burst_time= '0s/0s';
@@ -174,6 +175,9 @@ my $simple_total_queue = 'default-small';
 
 # nazwa listy z blokowanymi IP
 my $bloklista_nazwalisty = 'blokada';
+
+# recznie dodane wpisy ARP, ktore maja nie byc kasowane
+my $arp_nottodelete = 'nie_usuwac';
 
 my(%wireless_macs);
 my(%wireless_queues);
@@ -274,10 +278,16 @@ if ($Mtik::error_msg eq '' and $arp_enable) {
 		if(!$quiet) { 
 		    print STDERR " ID: $id |"; 
 		}
-		# zaznaczamy domyslnie kazdy wpis do usuniecia
+		# zaznaczamy domyslnie kazdy wpis do usuniecia ( 0 = usun)
 		$_=$wireless_arp{$id}{'comment'};
-		if (/$macs_usunac/) { $wireless_arp{$id}{'LMS'} = '0'; }
-		else { $wireless_arp{$id}{'LMS'} = '2'; }
+		if (/$macs_usunac/ || /$arp_nottodelete/) { 
+		    $wireless_arp{$id}{'LMS'} = '2'; 
+#		    print STDERR " 2 |$wireless_arp{$id}{'comment'}"; 
+		    }
+		else { 
+		    $wireless_arp{$id}{'LMS'} = '0'; 
+#		    print STDERR " 0 |$wireless_arp{$id}{'comment'}"; 
+		}
 	}
 }
 
