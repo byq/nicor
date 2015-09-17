@@ -42,7 +42,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.22';
+my $_version = '2.1.23';
 
 my %options = (
 	"--debug|d"             =>     \$debug,
@@ -96,7 +96,7 @@ if(!$mklistfile) {
 	$mklistfile = "/etc/lms-nett/mikrotik.list";
 }
 
-if(!$quiet) {
+if($version) {
 	print STDOUT "mikrotik, version $_version\n";
 	print STDOUT "(C) Copyright 2001-2006 LMS Developers\n";
 	print STDOUT "(C) Copyright 2009-20xx Emers\n";
