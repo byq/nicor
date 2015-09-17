@@ -40,7 +40,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.17';
+my $_version = '2.1.18';
 
 my %options = (
 	"--debug|d"              =>     \$debug,
@@ -199,11 +199,11 @@ if ( polacz_z_baza() ) {
 #		print STDERR " test 4";
 
 
-if(!$quiet) { print STDERR "Zalogowano\n"; }
+if(!$quiet) { print STDERR "Zalogowano"; }
 
 
 if ($acl_enable) {
-    if (!$quiet) { print STDERR "Aktualnie dodane wpisy do access listy:\n---------------------------------------\n"; }
+    if (!$quiet) { print STDERR "\n\nAktualnie dodane wpisy do access listy:\n---------------------------------------\n"; }
     %wireless_macs = Mtik::get_by_key('/interface/wireless/access-list/print','.id');
 #    print STDERR " error: $Mtik::error_msg\n";
     if ($Mtik::error_msg eq '' ) {
@@ -219,7 +219,7 @@ if ($acl_enable) {
 }
 
 if($queue_enable) {
-    if(!$quiet) { print STDERR "\nAktualnie dodane kolejki queue simple:\n--------------------------------------\n"; }
+    if(!$quiet) { print STDERR "\n\nAktualnie dodane kolejki queue simple:\n--------------------------------------\n"; }
     %wireless_queues = Mtik::get_by_key('/queue/simple/print','name');
 
 #		print STDERR " error: $Mtik::error_msg\n";
@@ -236,13 +236,13 @@ if ($Mtik::error_msg eq '' and $queue_enable) {
     }
 }
 
-if(!$quiet and $dhcp_enable) { print STDERR "Aktualnie dodane wpisy do serwera dhcp:\n---------------------------------------\n"; }
+if(!$quiet and $dhcp_enable) { print STDERR "\n\nAktualnie dodane wpisy do serwera dhcp:\n---------------------------------------\n"; }
     %wireless_dhcp = Mtik::get_by_key('/ip/dhcp-server/lease/print','.id');
 
 #		print STDERR " error: $Mtik::error_msg\n";
 
 if ($Mtik::error_msg eq '' and $dhcp_enable) {
-		    print STDERR " dhcp enable\n"; 
+#		    print STDERR " dhcp enable\n"; 
 	foreach my $id (keys (%wireless_dhcp)) {
 		if(!$quiet) { 
 		    print STDERR " ID: $id |"; 
@@ -255,13 +255,13 @@ if ($Mtik::error_msg eq '' and $dhcp_enable) {
 	}
 }
 
-if(!$quiet and $arp_enable) { print STDERR "Aktualnie dodane wpisy arp:\n---------------------------------------\n"; }
+if(!$quiet and $arp_enable) { print STDERR "\n\nAktualnie dodane wpisy arp:\n---------------------------------------\n"; }
 %wireless_arp = Mtik::get_by_key('/ip/arp/print','.id');
 
 #		print STDERR " error: $Mtik::error_msg\n";
 
 if ($Mtik::error_msg eq '' and $arp_enable) {
-		    print STDERR " arp enable\n"; 
+#		    print STDERR " arp enable\n"; 
 	foreach my $id (keys (%wireless_arp)) {
 		if(!$quiet) { 
 		    print STDERR " ID: $id |"; 
@@ -405,9 +405,12 @@ foreach my $key (@networks) {
 				    # problem: zmiana mac adresu pomiedzy istniejace IP - obejscie poprzez disable, 
 				    # a nastepnie enable, gdy bedzie kopia to error i remove
 				    foreach my $id (keys (%wireless_dhcp)) {
-                                        if ( ($wireless_dhcp{$id}{'mac-address'} eq $cmac ) || ($wireless_dhcp{$id}{'address'} eq $ipaddr) ) {
+#                                        if (!$quiet) { print STDERR "_1_"; }
+#                                        if (!$quiet) { print STDERR "1. dhcp $wireless_dhcp{$id}{'mac-address'} $wireless_dhcp{$id}{'address'} .$wireless_dhcp{$id}{'dynamic'}. > "; }
+                                        if ( ( ($wireless_dhcp{$id}{'mac-address'} eq $cmac ) || ($wireless_dhcp{$id}{'address'} eq $ipaddr) ) and ($wireless_dhcp{$id}{'dynamic'} eq 'false') ) {
                                                 if (!$quiet) { print STDERR "dhcp istnieje -> "; }
-#                                                if (!$quiet) { print STDERR "dhcp $wireless_dhcp{$id}{'mac-address'} $wireless_dhcp{$id}{'address'} istnieje -> "; }
+#                                                if (!$quiet) { print STDERR "2. dhcp .$wireless_dhcp{$id}{'dynamic'}. istnieje -> "; }
+#                                                if (!$quiet) { print STDERR "2. dhcp $wireless_dhcp{$id}{'mac-address'} $wireless_dhcp{$id}{'address'} .$wireless_dhcp{$id}{'dynamic'}. istnieje -> "; }
                                                 $dopisany=1;
                                                 my $poprawic_wpis_dhcp=0;
                                                 my %attrs8;
@@ -438,8 +441,14 @@ foreach my $key (@networks) {
                                                 else { if (!$quiet) { print STDERR "OK || "; } }
                                                 $wireless_dhcp{$id}{'LMS'} = 1;
                                         } # end of if ( ($wireless_macs{$id}{'mac-address'} eq $cmac ) and ( $wireless_macs{$id}{'interface'} eq $iface) ) 
+                                    if ($wireless_dhcp{$id}{'dynamic'} eq 'true') {
+                                            if (!$quiet) { print STDERR "dhcp $wireless_dhcp{$id}{'mac-address'} $wireless_dhcp{$id}{'address'} .$wireless_dhcp{$id}{'dynamic'}. usunac -> "; }
+					my %attrs10;
+					$attrs10{'.id'} = $id;
+					Mtik::mtik_cmd('/ip/dhcp-server/lease/remove',\%attrs10 ) ;
+                                    }
                                     } # end of foreach my $id (keys (%wireless_macs)) 
-				    }
+				}
 				    if (!$dopisany and $dhcp_enable) {
                                         print STDERR "brak dhcp, dodaje -> ";
 					my %attrs7; 
