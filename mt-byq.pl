@@ -11,8 +11,10 @@
 # 
 # nazwa serwer DHCP (dawne pole domain) w LMS musi byc identyczna z nazwa server w MT
 # nazwa interfejs w LMS musi byc identyczna z nazwa interfejsu w MT (interfejsem moze byc vlan, bridge lub fizyczny)
-#
-# dodatkowe pole na IP w LMS jest uwzgledniane przy tworzeniu kolejek
+# aby wlaczyc autoryzacje po mac nalezy dla danego interface w MT ustawic ARP: reply-only
+# by dzialal range dhcp dla nowych nalezy zaznaczyc w dhcp serwer na mt add-arp
+# 
+# dodatkowe pole na IP w LMS jest uwzgledniane tylko przy tworzeniu kolejek - nie w arp
 # 
 # Grzegorz Cichowski
 # gc@lanet.waw.pl gcichowski@gmail.com
@@ -38,7 +40,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.16';
+my $_version = '2.1.17';
 
 my %options = (
 	"--debug|d"              =>     \$debug,
@@ -132,7 +134,7 @@ my $def_down=100;	# minimalny download dla osób bez taryfy, potrzebny by daæ dos
 my $def_up=100;		# minimalny upload dla osób bez taryfy, potrzebny by daæ dostêp dp stron serwisowych
 my $aclprefix='LMS';	# przefix dodawany do wpisów generowanych automatycznie, przydatne, by odró¿niæ od statycznych
 my $tariff_mult=1;	# mno¿nik uploadu i downloadu, dobrze ustawiæ >1, by MT nie traci³ mocy CPU na zarz±dzanie pasmem, gdy u¿ytkownik osi±ga warto¶æ graniczn± taryfy
-my $macs_usunac='MT-';	# ignoruj urz±dzenia z tym prefixem w polu name, najczê¶ciej to sprzêt sieciowy, którego nie trzeba ograniczaæ
+my $macs_usunac='do_pominiecia-';	# ignoruj urz±dzenia z tym prefixem w polu name, najczê¶ciej to sprzêt sieciowy, którego nie trzeba ograniczaæ
 my $api_delay=0;	# czas (w sekundach) oczekiwania po zmianie/dokonaniu wpisu
 my $acl_enable=0; 	# czy zarzadzac accesslista
 my $queue_enable=1; 	# czy zarzadzac kolejkami
@@ -161,10 +163,16 @@ my $simple_limit_at= '0/0';
 my $simple_interface = 'all';
 my $simple_parent = 'none';
 my $simple_priority = '8';
-my $simple_queue = 'default-small/default-small';
+#my $simple_queue = 'default-small/default-small';
+my $simple_queue = 'wireless-default/wireless-default';
 my $simple_time = '12h-1d,sun,mon,tue,wed,thu,fri,sat';
 my $simple_time_n = '0s-12h,sun,mon,tue,wed,thu,fri,sat';
 my $simple_total_queue = 'default-small';
+
+my(%wireless_macs);
+my(%wireless_queues);
+my(%wireless_dhcp);
+my(%wireless_arp);
 
 #domyslne ustawienia regulki dhcp-server lease
 
@@ -192,39 +200,44 @@ if ( polacz_z_baza() ) {
 
 
 if(!$quiet) { print STDERR "Zalogowano\n"; }
-if(!$quiet and $acl_enable) { print STDERR "Aktualnie dodane wpisy do access listy:\n---------------------------------------\n"; }
-my(%wireless_macs) = Mtik::get_by_key('/interface/wireless/access-list/print','.id');
 
-#		print STDERR " error: $Mtik::error_msg\n";
 
-if ($Mtik::error_msg eq '' and $acl_enable) {
-#		    print STDERR " acl enable\n"; 
+if ($acl_enable) {
+    if (!$quiet) { print STDERR "Aktualnie dodane wpisy do access listy:\n---------------------------------------\n"; }
+    %wireless_macs = Mtik::get_by_key('/interface/wireless/access-list/print','.id');
+#    print STDERR " error: $Mtik::error_msg\n";
+    if ($Mtik::error_msg eq '' ) {
+		    print STDERR " acl enable\n"; 
 	foreach my $id (keys (%wireless_macs)) {
-		if(!$quiet) { print STDERR " ID: $id\n"; }
+		if(!$quiet) { print STDERR " ID: $id |"; }
 		# zaznaczamy domy¶lnie ka¿dy wpis do usuniêcia
 		$_=$wireless_macs{$id}{'comment'};
 		if (/$macs_usunac/) { $wireless_macs{$id}{'LMS'} = '2'; }
 		else { $wireless_macs{$id}{'LMS'} = '0'; }
 	}
+    }
 }
-if(!$quiet and $queue_enable) { print STDERR "\nAktualnie dodane kolejki queue simple:\n--------------------------------------\n"; }
-my(%wireless_queues) = Mtik::get_by_key('/queue/simple/print','name');
 
-#B		print STDERR " error: $Mtik::error_msg\n";
+if($queue_enable) {
+    if(!$quiet) { print STDERR "\nAktualnie dodane kolejki queue simple:\n--------------------------------------\n"; }
+    %wireless_queues = Mtik::get_by_key('/queue/simple/print','name');
+
+#		print STDERR " error: $Mtik::error_msg\n";
 
 if ($Mtik::error_msg eq '' and $queue_enable) {
 #		    print STDERR " queue enable\n"; 
 	foreach my $name_queues (keys (%wireless_queues)) {
-		if(!$quiet) { print STDERR " Name: $name_queues\n"; }
+		if(!$quiet) { print STDERR " Name: $name_queues |"; }
 		# zaznaczamy domyslnie kazdy wpis do usuniecia
 		$_=$wireless_queues{$name_queues}{'comment'};
 		if (/$macs_usunac/) { $wireless_queues{$name_queues}{'LMS'} = '2'; }
 		else { $wireless_queues{$name_queues}{'LMS'} = '0'; }
 	}
+    }
 }
 
 if(!$quiet and $dhcp_enable) { print STDERR "Aktualnie dodane wpisy do serwera dhcp:\n---------------------------------------\n"; }
-my(%wireless_dhcp) = Mtik::get_by_key('/ip/dhcp-server/lease/print','.id');
+    %wireless_dhcp = Mtik::get_by_key('/ip/dhcp-server/lease/print','.id');
 
 #		print STDERR " error: $Mtik::error_msg\n";
 
@@ -232,7 +245,7 @@ if ($Mtik::error_msg eq '' and $dhcp_enable) {
 		    print STDERR " dhcp enable\n"; 
 	foreach my $id (keys (%wireless_dhcp)) {
 		if(!$quiet) { 
-		    print STDERR " ID: $id\n"; 
+		    print STDERR " ID: $id |"; 
 		}
 		# zaznaczamy domyslnie kazdy wpis do usuniecia
 		$_=$wireless_dhcp{$id}{'comment'};
@@ -243,15 +256,15 @@ if ($Mtik::error_msg eq '' and $dhcp_enable) {
 }
 
 if(!$quiet and $arp_enable) { print STDERR "Aktualnie dodane wpisy arp:\n---------------------------------------\n"; }
-my(%wireless_arp) = Mtik::get_by_key('/ip/arp/print','.id');
+%wireless_arp = Mtik::get_by_key('/ip/arp/print','.id');
 
-		print STDERR " error: $Mtik::error_msg\n";
+#		print STDERR " error: $Mtik::error_msg\n";
 
 if ($Mtik::error_msg eq '' and $arp_enable) {
 		    print STDERR " arp enable\n"; 
 	foreach my $id (keys (%wireless_arp)) {
 		if(!$quiet) { 
-		    print STDERR " ID: $id\n"; 
+		    print STDERR " ID: $id |"; 
 		}
 		# zaznaczamy domyslnie kazdy wpis do usuniecia
 		$_=$wireless_arp{$id}{'comment'};
@@ -282,12 +295,14 @@ foreach my $key (@networks) {
 				my $ipaddr = $row2->{'ipaddr'};
 				my $ipaddr_pub = $row2->{'ipaddr_pub'};
 				my $cmac = $row2->{'mac'};
+                            print STDERR " ip: $ipaddr  ";
 				my $ownerid = $row2->{'ownerid'};
 				my $ipaddr32=$ipaddr."/32";
 				my $ipaddr_pub32=$ipaddr_pub."/32";
 				my $name_kolejka = $row2->{'name'};
 				# budujemy opis, jesli zaczyna sie od prefixu LMS, to jest dodane przez skrypt
 				my $name = $aclprefix.':uid'.$ownerid.':nid'.$row2->{'id'}.':'.$row2->{'name'};
+#				my $name = $aclprefix.':uid'.$ownerid.':nid'.$row2->{'id'};
 				my $taryfa = taryfy($ownerid,$ipaddr);
 				# ustawiamy domyslna predkosc, nawet jak ktos nie ma taryfy, aby wyswietlaly sie strony serwisowe
 				my $down=$def_down;
@@ -451,16 +466,20 @@ foreach my $key (@networks) {
 				if ($arp_enable) {
                                     my $poprawic_wpis_arp=0;
 				    foreach my $id (keys (%wireless_arp)) {
+#                                        if ( ($wireless_arp{$id}{'mac-address'} eq $cmac ) || ($wireless_arp{$id}{'address'} eq ($ipaddr || $ipaddr_pub)) ) {
+#                                        if ( (($wireless_arp{$id}{'mac-address'} eq $cmac ) || ($wireless_arp{$id}{'address'} eq $ipaddr)) and $wireless_arp{$id}{'comment'} !=~ m/dodatkowy$/) {
+#                                        if ( (($wireless_arp{$id}{'mac-address'} eq $cmac ) || ($wireless_arp{$id}{'address'} eq $ipaddr)) and $wireless_arp{$id}{'comment'} =~ m/podstawowy$/) {
                                         if ( ($wireless_arp{$id}{'mac-address'} eq $cmac ) || ($wireless_arp{$id}{'address'} eq $ipaddr) ) {
                                                 if (!$quiet) { print STDERR "arp istnieje -> "; }
                                                 $dopisany=1;
                                                 my $poprawic_wpis_arp=0;
                                                 my %attrs8;
                                                 # jesli juz dodany, to trzeba sprawdzic wszystkie atrybuty i ewentualnie poprawic
-                                                if ( $wireless_arp{$id}{'address'} ne $ipaddr )		{ $wireless_arp{$id}{'address'}=$ipaddr;		$poprawic_wpis_arp+= 1;	 $attrs8{'address'}=$ipaddr; }
-						if ( $wireless_arp{$id}{'mac-address'} ne $cmac )	{ $wireless_arp{$id}{'mac-address'}=$cmac;		$poprawic_wpis_arp+= 2;	 $attrs8{'mac-address'}=$cmac; }
-						if ( $wireless_arp{$id}{'comment'} ne $name )		{ $wireless_arp{$id}{'comment'}=$name;			$poprawic_wpis_arp+= 4;	 $attrs8{'comment'}=$name; }
-						if ( $wireless_arp{$id}{'interface'} ne $iface )	{ $wireless_arp{$id}{'interface'}=$iface;		$poprawic_wpis_arp+= 8;	 $attrs8{'interface'}=$iface; }
+#                                        	if (!$quiet) { print STDERR "( .. $wireless_arp{$id}{'interface'} .. $iface .. "; }
+                                                if ( $wireless_arp{$id}{'address'} ne $ipaddr )		{ $wireless_arp{$id}{'address'}=$ipaddr;	$poprawic_wpis_arp+= 1;	 $attrs8{'address'}=$ipaddr; }
+						if ( $wireless_arp{$id}{'mac-address'} ne $cmac )	{ $wireless_arp{$id}{'mac-address'}=$cmac;	$poprawic_wpis_arp+= 2;	 $attrs8{'mac-address'}=$cmac; }
+						if ( $wireless_arp{$id}{'comment'} ne $name )		{ $wireless_arp{$id}{'comment'}=$name;		$poprawic_wpis_arp+= 4;	 $attrs8{'comment'}=$name; }
+						if ( $wireless_arp{$id}{'interface'} ne $iface )	{ $wireless_arp{$id}{'interface'}=$iface;	$poprawic_wpis_arp+= 8;	 $attrs8{'interface'}=$iface; }
                                                 if ( $poprawic_wpis_arp and $wireless_arp{$id}{'LMS'} < 2 ) {
                                                         if (!$quiet) { print STDERR "arp jest do poprawy ($poprawic_wpis_arp) -> "; }
                                                         $attrs8{'.id'} = $id;
@@ -486,11 +505,14 @@ foreach my $key (@networks) {
                                         } # end of if ( ($wireless_macs{$id}{'mac-address'} eq $cmac ) and ( $wireless_macs{$id}{'interface'} eq $iface) ) 
                                     } # end of foreach my $id (keys (%wireless_macs)) 
 				    }
+# jezeli nie ma takiego wpisu to trzeba go dodac:
 				    if (!$dopisany and $arp_enable) {
+# arp z podstawowego pola:
                                         print STDERR "brak arp, dodaje -> ";
 					my %attrs3; 
 					$attrs3{'address'} = $ipaddr; 
 					$attrs3{'mac-address'} = $cmac; 
+#					$attrs3{'comment'} = $name.":podstawowy";
 					$attrs3{'comment'} = $name;
 					$attrs3{'interface'} = $iface; 
 					my($retval3,@results3)=Mtik::mtik_cmd('/ip/arp/add',\%attrs3);
@@ -500,8 +522,28 @@ foreach my $key (@networks) {
                                                 print "BLAD przy dodawaniu wpisu arp!! || "; 
 #						print " error: $Mtik::error_msg\n";
                                                 }
-                                        else { if (!$quiet) { print STDERR "OK(add_arp) \n "; } }
-                                	}
+                                        else { if (!$quiet) { print STDERR "OK(add_arp) "; } }
+# arp z dodatkowego pola:
+#					if ($ipaddr_pub ne "0.0.0.0") 
+#					{ 
+##                                	    print STDERR "ip: $ipaddr $ipaddr_pub ";
+#                                    	    print STDERR "brak arp, dodaje -> ";
+#					    my %attrs13; 
+#					    $attrs13{'address'} = $ipaddr_pub; 
+#					    $attrs13{'mac-address'} = $cmac; 
+#					    $attrs13{'comment'} = $name.":dodatkowy";
+#					    $attrs13{'interface'} = $iface; 
+#					    my($retval13,@results3)=Mtik::mtik_cmd('/ip/arp/add',\%attrs13);
+#                                    	    sleep ($api_delay);
+#                                	    print STDERR "ret: $retval13 -> ";
+#                                    	    if ($retval13 != 1) {
+#                                                print "BLAD przy dodawaniu wpisu arp!! || "; 
+##						print " error: $Mtik::error_msg\n";
+#                                                }
+#                                        else { if (!$quiet) { print STDERR "OK(add_arp) \n "; } }
+#                                	}
+
+                                	} #endof if (!$dopisany and $arp_enable)
 ####### arp ^
 
 ####### queue v
@@ -531,9 +573,8 @@ foreach my $key (@networks) {
 #print STDERR " speed: $wireless_queues{$name_kolejka}{'target'}. $ipaddr . $ipaddr_32 ";
 					my %attrs5;
 					if ( $wireless_queues{$name_kolejka}{'max-limit'} ne $max_limit )   { $wireless_queues{$name_kolejka}{'max-limit'}=$max_limit;  $poprawic_wpis_simple+= 1;  $attrs5{'max-limit'} = $max_limit; }
-					if ( $wireless_queues{$name_kolejka}{'time'} ne $simple_time )      { $wireless_queues{$name_kolejka}{'time'}=$simple_time;     $poprawic_wpis_simple+= 8;  $attrs5{'time'} = $simple_time; }
+					if ( $wireless_queues{$name_kolejka}{'time'} ne $simple_time )      { $wireless_queues{$name_kolejka}{'time'}=$simple_time;     $poprawic_wpis_simple+= 4;  $attrs5{'time'} = $simple_time; }
 					if ( $wireless_queues{$name_kolejka}{'target'} ne $ipaddr_32 )      { $wireless_queues{$name_kolejka}{'target'}=$ipaddr_32;  	$poprawic_wpis_simple+= 2;  $attrs5{'target'} = $ipaddr_32; }
-#					if ( $wireless_queues{$name_kolejka}{'target'} ne $ipaddr )  	    { $wireless_queues{$name_kolejka}{'target'}=$ipaddr;  	$poprawic_wpis_simple+= 2;  $attrs5{'target'} = $ipaddr; }
 					if ( $poprawic_wpis_simple ) {
 
 						if (!$quiet) { print STDERR "queue jest do poprawy ($poprawic_wpis_simple): "; }
@@ -548,32 +589,24 @@ foreach my $key (@networks) {
 				    }
 				    else {
 					my %attrs1; 
-#					if ($ipaddr_pub eq "0.0.0.0") 
-#					{ 
 					    $attrs1{'name'} = $name_kolejka; $attrs1{'target'} = $ipaddr_; $attrs1{'max-limit'} = $max_limit; $attrs1{'burst-limit'} = $simple_burst_limit; $attrs1{'burst-threshold'} = $simple_burst_threshold; $attrs1{'burst-time'} = $simple_burst_time; $attrs1{'disabled'} = $simple_disable; 
-#					}
-#					else {
-#						$attrs1{'name'} = $name_kolejka; $attrs1{'target'} = "$ipaddr, $ipaddr_pub"; $attrs1{'max-limit'} = $max_limit; $attrs1{'burst-limit'} = $simple_burst_limit; $attrs1{'burst-threshold'} = $simple_burst_threshold; $attrs1{'burst-time'} = $simple_burst_time; $attrs1{'disabled'} = $simple_disable; 
-#					    }
 					$attrs1{'dst'} = $simple_dst_address; $attrs1{'limit-at'} = $simple_limit_at; $attrs1{'parent'} = $simple_parent; $attrs1{'priority'} = $simple_priority; $attrs1{'queue'} = $simple_queue; $attrs1{'time'} = $simple_time; $attrs1{'total-queue'} = $simple_total_queue;
-#					$attrs1{'direction'} = $simple_direction; $attrs1{'interface'} = $simple_interface; 
 					my($retval1,@results1)=Mtik::mtik_cmd('/queue/simple/add',\%attrs1);
 					sleep ($api_delay);
 					print STDERR "ret: $retval1 -> ";
 					if ($retval1 != 1) {
 						print "BLAD przy dodawaniu queue!\n"; }
-					else { if (!$quiet) { print STDERR "OK(add_queue)\n"; } }
+					else { if (!$quiet) { print STDERR "OK(add_queue) "; } }
 				    }
 ### queue dzien ^
 ### queue noc v
 				    if ( defined ($wireless_queues{$name_kolejka."_\$"}{'name'}) ) {
 					if (!$quiet) { print STDERR "queue_n istnieje -> "; }
 					my %attrs11;
-my $w = $wireless_queues{$name_kolejka."_\$"}{'target'};
+#					my $w = $wireless_queues{$name_kolejka."_\$"}{'target'};
 					if ( $wireless_queues{$name_kolejka."_\$"}{'max-limit'} ne $max_limit_n )       { $wireless_queues{$name_kolejka."_\$"}{'max-limit'}=$max_limit_n;      $poprawic_wpis_simple_n+= 1;  $attrs11{'max-limit'} = $max_limit_n; }
 					if ( $wireless_queues{$name_kolejka."_\$"}{'target'} ne $ipaddr_32 )  		{ $wireless_queues{$name_kolejka."_\$"}{'target'}=$ipaddr_32;  		$poprawic_wpis_simple_n+= 2;  $attrs11{'target'} = $ipaddr_32; }
-#					if ( $w ne $ipaddr )  		{ $wireless_queues{$name_kolejka."_\$"}{'target'}=$ipaddr;  		$poprawic_wpis_simple_n+= 2;  $attrs11{'target'} = $ipaddr; }
-					if ( $wireless_queues{$name_kolejka."_\$"}{'time'} ne $simple_time_n )          { $wireless_queues{$name_kolejka."_\$"}{'time'}=$simple_time_n;         $poprawic_wpis_simple_n+= 8;  $attrs11{'time'} = $simple_time_n; }
+					if ( $wireless_queues{$name_kolejka."_\$"}{'time'} ne $simple_time_n )          { $wireless_queues{$name_kolejka."_\$"}{'time'}=$simple_time_n;         $poprawic_wpis_simple_n+= 4;  $attrs11{'time'} = $simple_time_n; }
 					if ( $poprawic_wpis_simple_n ) {
 						if (!$quiet) { print STDERR "queue_n jest do poprawy: "; }
 #						if (!$quiet) { print STDERR "($poprawic_wpis_simple_n ,$w,$ipaddr_32,): "; }
@@ -589,22 +622,15 @@ my $w = $wireless_queues{$name_kolejka."_\$"}{'target'};
 				    else {
 					print STDERR "dodawanie queue_noc -> ";
 					my %attrs12; 
-#					if ($ipaddr_pub eq "0.0.0.0") 
-#					{ 
 					    $attrs12{'name'} = $name_kolejka; $attrs12{'target'} = $ipaddr_; $attrs12{'max-limit'} = $max_limit; $attrs12{'burst-limit'} = $simple_burst_limit; $attrs12{'burst-threshold'} = $simple_burst_threshold; $attrs12{'burst-time'} = $simple_burst_time; $attrs12{'disabled'} = $simple_disable;
-#					}
-#					else {
-#						$attrs12{'name'} = $name_kolejka; $attrs12{'target'} = "$ipaddr, $ipaddr_pub"; $attrs12{'max-limit'} = $max_limit; $attrs12{'burst-limit'} = $simple_burst_limit; $attrs12{'burst-threshold'} = $simple_burst_threshold; $attrs12{'burst-time'} = $simple_burst_time; $attrs12{'disabled'} = $simple_disable;
-#					    }
 					$attrs12{'dst'} = $simple_dst_address; $attrs12{'limit-at'} = $simple_limit_at; $attrs12{'parent'} = $simple_parent; $attrs12{'priority'} = $simple_priority; $attrs12{'queue'} = $simple_queue; $attrs12{'time'} = $simple_time; $attrs12{'total-queue'} = $simple_total_queue;
 					$attrs12{'name'} = $name_kolejka."_\$"; $attrs12{'max-limit'} = $max_limit_n; $attrs12{'time'} = $simple_time_n;
-#					$attrs12{'direction'} = $simple_direction; $attrs12{'interface'} = $simple_interface; 
 					my($retval12,@results1)=Mtik::mtik_cmd('/queue/simple/add',\%attrs12);
 					sleep ($api_delay);
 					print STDERR "ret: $retval12 -> ";
 					if ($retval12 != 1) {
 						print "BLAD przy dodawaniu queue!\n"; }
-					else { if (!$quiet) { print STDERR "OK(add_queue)\n"; } }
+					else { if (!$quiet) { print STDERR "OK(add_queue) "; } }
 				    }
 ### queue noc ^
 				{ if (!$quiet) { print STDERR "OK \n"; } }
