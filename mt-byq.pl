@@ -13,7 +13,9 @@
 # nazwa interfejs w LMS musi byc identyczna z nazwa interfejsu w MT (interfejsem moze byc vlan, bridge lub fizyczny)
 # aby wlaczyc autoryzacje po mac nalezy dla danego interface w MT ustawic ARP: reply-only
 # by dzialal range dhcp dla nowych nalezy zaznaczyc w dhcp serwer na mt add-arp
+# by dzialaly komunikaty nowykomp i blokada nalezy w mt dodac reguly firewall na forward i dstnat oraz dodac address list na range dhcp i dodac pool
 # 
+#
 # dodatkowe pole na IP w LMS jest uwzgledniane tylko przy tworzeniu kolejek - nie w arp
 # 
 # Grzegorz Cichowski
@@ -40,7 +42,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.18';
+my $_version = '2.1.19';
 
 my %options = (
 	"--debug|d"              =>     \$debug,
@@ -140,6 +142,7 @@ my $acl_enable=0; 	# czy zarzadzac accesslista
 my $queue_enable=1; 	# czy zarzadzac kolejkami
 my $dhcp_enable=1;	# czy zarzadzac dhcp
 my $arp_enable=1;	# czy zarzadzac arp
+my $bloklista_enable=1;	# czy zarzadzac bloklista w firewallu
 
 #domyslne ustawienia regulki interface wireless access-list
 my $macs_private_algo='none';
@@ -169,10 +172,14 @@ my $simple_time = '12h-1d,sun,mon,tue,wed,thu,fri,sat';
 my $simple_time_n = '0s-12h,sun,mon,tue,wed,thu,fri,sat';
 my $simple_total_queue = 'default-small';
 
+# nazwa listy z blokowanymi IP
+my $bloklista_nazwalisty = 'blokada';
+
 my(%wireless_macs);
 my(%wireless_queues);
 my(%wireless_dhcp);
 my(%wireless_arp);
+my(%wireless_bloklista);
 
 #domyslne ustawienia regulki dhcp-server lease
 
@@ -201,6 +208,7 @@ if ( polacz_z_baza() ) {
 
 if(!$quiet) { print STDERR "Zalogowano"; }
 
+# odczyt aktualnych wpisow
 
 if ($acl_enable) {
     if (!$quiet) { print STDERR "\n\nAktualnie dodane wpisy do access listy:\n---------------------------------------\n"; }
@@ -268,19 +276,36 @@ if ($Mtik::error_msg eq '' and $arp_enable) {
 		}
 		# zaznaczamy domyslnie kazdy wpis do usuniecia
 		$_=$wireless_arp{$id}{'comment'};
-		if (/$macs_usunac/) { $wireless_arp{$id}{'LMS'} = '2'; }
-		else { $wireless_arp{$id}{'LMS'} = '0'; }
+		if (/$macs_usunac/) { $wireless_arp{$id}{'LMS'} = '0'; }
+		else { $wireless_arp{$id}{'LMS'} = '2'; }
 	}
 }
 
-if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable )) { print STDERR "\n";}
+if ($bloklista_enable) {
+    if (!$quiet) { print STDERR "\n\nAktualnie dodane wpisy do bloklisty:\n---------------------------------------\n"; }
+    %wireless_bloklista = Mtik::get_by_key('/ip/firewall/address-list/print','.id');
+#    print STDERR " error: $Mtik::error_msg\n";
+    if ($Mtik::error_msg eq '' ) {
+#		    print STDERR " bloklista enable\n"; 
+	foreach my $id (keys (%wireless_bloklista)) {
+		if(!$quiet) { print STDERR " ID: $id |"; }
+		# zaznaczamy domyslnie kazdy wpis do usuniecia
+		$_=$wireless_bloklista{$id}{'list'};
+		if (/$bloklista_nazwalisty/) { $wireless_bloklista{$id}{'LMS'} = '0'; }
+		else { $wireless_bloklista{$id}{'LMS'} = '2'; }
+#		print STDERR " u: $wireless_bloklista{$id}{'LMS'} |"; 
+	}
+    }
+}
+
+if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable or $bloklista_enable)) { print STDERR "\n";}
 my @networks = split ' ', $mknetl;
 foreach my $key (@networks) {
 	my $dbq = $dbase->prepare("SELECT id, inet_ntoa(address) AS address, mask, interface, domain  FROM networks WHERE name = UPPER('$key')");
 	$dbq->execute();
 	if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable ) ) { print STDERR "\nSprawdzam siec: $key\n";}
 	while (my $row = $dbq->fetchrow_hashref()) {
-		my $dbq2 = $dbase->prepare("SELECT id, name, ipaddr, ipaddr_pub, mac, ownerid FROM vnodes WHERE name not like '%$macs_usunac%' ORDER BY ipaddr ASC");
+		my $dbq2 = $dbase->prepare("SELECT id, name, ipaddr, ipaddr_pub, mac, ownerid, access FROM vnodes WHERE name not like '%$macs_usunac%' ORDER BY ipaddr ASC");
 		$dbq2->execute();
 		my $iface = $row->{'interface'}; # nazwa interfejsu na MT przechowywana jest w polu interface w konfiguracji konkretnej sieci
 		my $server = $row->{'domain'}; # nazwa servera dhcp na MT przechowywana jest w polu domain w konfiguracji konkretnej sieci
@@ -295,7 +320,8 @@ foreach my $key (@networks) {
 				my $ipaddr = $row2->{'ipaddr'};
 				my $ipaddr_pub = $row2->{'ipaddr_pub'};
 				my $cmac = $row2->{'mac'};
-                            print STDERR " ip: $ipaddr  ";
+				my $access = $row2->{'access'};
+#                            print STDERR " ip: $ipaddr  ";
 				my $ownerid = $row2->{'ownerid'};
 				my $ipaddr32=$ipaddr."/32";
 				my $ipaddr_pub32=$ipaddr_pub."/32";
@@ -555,6 +581,94 @@ foreach my $key (@networks) {
                                 	} #endof if (!$dopisany and $arp_enable)
 ####### arp ^
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+####### bloklista v
+# zapetlic trzeba by dodawane byly ipki z dodatkowego pola
+# ew. dodatkowy ip traktowany wspolnie razem z podstawowym
+# tylko jak to sie zachowa przy weryfikacji istniejacych?
+				my $dopisany = 0;
+				if ($bloklista_enable) {
+                                    my $poprawic_wpis_bloklista=0;
+				    foreach my $id (keys (%wireless_bloklista)) {
+                                        if  ($wireless_bloklista{$id}{'address'} eq $ipaddr and !$access)  {
+                                                if (!$quiet) { print STDERR "wpis w blokliscie istnieje -> "; }
+                                                $dopisany=1;
+                                                my $poprawic_wpis_bloklista=0;
+                                                my %attrs15;
+                                                # jesli juz dodany, to trzeba sprawdzic wszystkie atrybuty i ewentualnie poprawic
+                                                if ( $wireless_bloklista{$id}{'address'} ne $ipaddr )	{ $wireless_bloklista{$id}{'address'}=$ipaddr;	$poprawic_wpis_bloklista+= 1;	 $attrs15{'address'}=$ipaddr; }
+						if ( $wireless_bloklista{$id}{'comment'} ne $name )	{ $wireless_bloklista{$id}{'comment'}=$name;	$poprawic_wpis_bloklista+= 2;	 $attrs15{'comment'}=$name; }
+                                                if ( $poprawic_wpis_bloklista and $wireless_bloklista{$id}{'LMS'} < 2 ) {
+                                                        if (!$quiet) { print STDERR "wpis w blokliscie jest do poprawy ($poprawic_wpis_bloklista) -> "; }
+                                                        $attrs15{'.id'} = $id;
+                                                        # przed zapisaniem zmian wpis ma byc disabled, a na koniec enabled by ominac error
+                                                        $attrs15{'disabled'} = 'yes';
+                                                        my($retval15,@results15)=Mtik::mtik_cmd('/ip/firewall/address-list/set',\%attrs15);
+                                                        sleep ($api_delay);
+                                                        print STDERR "ret: $retval15 -> ";
+                                                        if ($retval15 != 1) {
+                                                                print STDERR "BLAD przy zmianie wpisu w bloklist! pewno jest juz taki ip|| "; }
+                                                        else { if (!$quiet) { print STDERR "OK(set_blokllst) || "; } }
+							# enable dla edytowanego wpisu
+                                                        $attrs15{'disabled'} = 'no';
+							my($retval15,@results15)=Mtik::mtik_cmd('/ip/firewall/address-list/set',\%attrs15);
+							# kasujemy disabled zakonczony errorem
+							my %attrs16;
+							$attrs16{'.id'} = $id;
+							if ($Mtik::error_msg) { Mtik::mtik_cmd('/ip/firewall/address-list/remove',\%attrs16 ) ;}
+                                                } # koniec poprawiania wpisow
+                                                else { if (!$quiet) { print STDERR "OK || "; } }
+                                                $wireless_bloklista{$id}{'LMS'} = 1;
+
+                                        } # end of if ( ($wireless_macs{$id}{'mac-address'} eq $cmac ) and ( $wireless_macs{$id}{'interface'} eq $iface) ) 
+                                    } # end of foreach my $id (keys (%wireless_macs)) 
+				    }
+# jezeli nie ma takiego wpisu to trzeba go dodac:
+				    if (!$dopisany and $bloklista_enable and !$access ) {
+# z podstawowego pola:
+                                        print STDERR "brak wpisu w bloklist, dodaje -> ";
+					my %attrs17; 
+					$attrs17{'address'} = $ipaddr; 
+					$attrs17{'comment'} = $name;
+					$attrs17{'list'} = $bloklista_nazwalisty;
+					my($retval17,@results17)=Mtik::mtik_cmd('/ip/firewall/address-list/add',\%attrs17);
+                                        sleep ($api_delay);
+                                        print STDERR "rett: $retval17 -> ";
+                                        if ($retval17 != 1) {
+                                                print "BLAD przy dodawaniu wpisu w bloklist!! || "; 
+						print " error: $Mtik::error_msg\n";
+                                                }
+                                        else { if (!$quiet) { print STDERR "OK(add_bloklist) "; } }
+
+                                	} #endof if (!$dopisany and $arp_enable)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ####### queue v
 				if ($queue_enable) {
 				    my $poprawic_wpis_simple=0;
@@ -644,9 +758,38 @@ foreach my $key (@networks) {
 ### queue noc ^
 				{ if (!$quiet) { print STDERR "OK \n"; } }
 				} # end of if ($queue_enable) 
+####### queue ^
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 			} # end of if(matchip($row2->{'ipaddr'},$row->{'address'},$row->{'mask'})) 
 		} # end of while (my $row2 = $dbq2->fetchrow_hashref()) 
-####### queue ^
+
+
+
+
+
 
 
 		if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable )) { print STDERR "\n";}
@@ -727,6 +870,33 @@ foreach my $key (@networks) {
 			}
 		    }
 		}
+
+
+
+		if ($bloklista_enable) {
+                    foreach my $id (keys (%wireless_bloklista)) {
+# sprawdzenie, czy analizowany IP nalezy do sprawdzanej sieci, jezeli nie to nie usuwa go
+			$ipjestwsieci = matchip($wireless_bloklista{$id}{'address'},$address,$mask);
+#print STDERR "\n . $ipjestwsieci . net: $address maska: $mask . ip: $wireless_bloklista{$id}{'address'} \n";
+                        if ($wireless_bloklista{$id}{'LMS'} < 1 and $ipjestwsieci) {
+#                                print STDERR "uwaga bloklista: $wireless_bloklista{$id}{'LMS'} | ";
+                                print STDERR "usuwam zbedne bloklista: $wireless_bloklista{$id}{'address'} -> ";
+                                my %attrs14; $attrs14{'.id'}=$wireless_bloklista{$id}{'.id'};
+                                my($retval14,@results14)=Mtik::mtik_cmd('/ip/firewall/address-list/remove',\%attrs14);
+                                sleep ($api_delay);
+                                print STDERR "ret: $retval14 -> ";
+                                if ($retval14 == 1) {
+                                        if (!$quiet) { print STDERR "OK!(del_bloklista)\n";} 
+
+                                        }
+                                else { print "BLAD!(del_bloklista)\n"; }
+                        }
+                    }
+                }
+
+
+
+
 
 	} # end of while (my $row = $dbq->fetchrow_hashref()) {
 } # end of foreach my $key (@networks) {
