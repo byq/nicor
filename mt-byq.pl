@@ -29,7 +29,7 @@ use Config::IniFiles;
 use Getopt::Long;
 use Time::Local;
 use POSIX qw(strftime mktime);
-use vars qw($configfile $quiet $help $version $force $fakedate $mklistfile $error_msg $debug);
+use vars qw($configfile $quiet $help $version $force $fakedate $mklistfile $error_msg $debug $info);
 
 $ENV{'PATH'}='/sbin:/usr/sbin:/usr/local/sbin:/bin:/usr/bin:/usr/local/bin:/etc/rc.d/:/etc/lms-nett';
 
@@ -42,10 +42,11 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.20';
+my $_version = '2.1.21';
 
 my %options = (
-	"--debug|d"              =>     \$debug,
+	"--debug|d"             =>     \$debug,
+	"--info|i"              =>     \$info,
 	"--config-file|C=s"	=>	\$configfile,
 	"--mklist|l=s"		=>	\$mklistfile,
 	"--quiet|q"		=>	\$quiet,
@@ -68,6 +69,7 @@ mikrotik, version $_version
 -l, --mklist=/etc/lms-nett/mikrotik.list	mikrotik's list file (default: /etc/lms-nett/mikrotik.list);
 -h, --help			print this help and exit;
 -v, --version			print version info and exit;
+-q, --info			show only changes;
 -q, --quiet			suppress any output, except errors;
 -f, --force			force reload specific mikrotik;
 
@@ -132,10 +134,12 @@ my $ipjestwsieci;
 my $mask;
 my $address;
 
-my $def_down=100;	# minimalny download dla osób bez taryfy, potrzebny by daæ dostêp dp stron serwisowych
-my $def_up=100;		# minimalny upload dla osób bez taryfy, potrzebny by daæ dostêp dp stron serwisowych
+my $def_down=10;	# minimalny download dla osob bez taryfy, potrzebny by dac dostep dp stron serwisowych
+my $def_up=10;		# minimalny upload dla osob bez taryfy, potrzebny by dac dostep dp stron serwisowych
 my $aclprefix='LMS';	# przefix dodawany do wpisów generowanych automatycznie, przydatne, by odró¿niæ od statycznych
 my $tariff_mult=1;	# mno¿nik uploadu i downloadu, dobrze ustawiæ >1, by MT nie traci³ mocy CPU na zarz±dzanie pasmem, gdy u¿ytkownik osi±ga warto¶æ graniczn± taryfy
+
+#nie znaznacza do usuniecia, oraz nie wyciaga z bazy kompow z taka nazwa
 my $macs_usunac='do_pominiecia-';	# ignoruj urz±dzenia z tym prefixem w polu name, najczê¶ciej to sprzêt sieciowy, którego nie trzeba ograniczaæ
 my $api_delay=0;	# czas (w sekundach) oczekiwania po zmianie/dokonaniu wpisu
 
@@ -311,10 +315,12 @@ if ($bloklista_enable) {
 if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable or $bloklista_enable)) { print STDERR "\n";}
 my @networks = split ' ', $mknetl;
 foreach my $key (@networks) {
+# pobranie sieci z bazy
 	my $dbq = $dbase->prepare("SELECT id, inet_ntoa(address) AS address, mask, interface, domain  FROM networks WHERE name = UPPER('$key')");
 	$dbq->execute();
 	if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable ) ) { print STDERR "\nSprawdzam siec: $key\n";}
 	while (my $row = $dbq->fetchrow_hashref()) {
+# pobranie komputerow z bazy
 		my $dbq2 = $dbase->prepare("SELECT id, name, ipaddr, ipaddr_pub, mac, ownerid, access FROM vnodes WHERE name not like '%$macs_usunac%' ORDER BY ipaddr ASC");
 		$dbq2->execute();
 		my $iface = $row->{'interface'}; # nazwa interfejsu na MT przechowywana jest w polu interface w konfiguracji konkretnej sieci
@@ -390,6 +396,7 @@ foreach my $key (@networks) {
 						if ( $wireless_macs{$id}{'comment'} ne $name )                                       { $wireless_macs{$id}{'comment'}=$name;                                        $poprawic_wpis+= 512; $attrs4{'comment'}=$name; }
 						if ( $poprawic_wpis and $wireless_macs{$id}{'LMS'} < 2 ) {
 							if (!$quiet) { print STDERR "acl jest do poprawy ($poprawic_wpis) -> "; }
+							if ($info) { print STDERR "acl jest do poprawy ($poprawic_wpis) -> "; }
 							$attrs4{'.id'} = $id;
 							my($retval4,@results4)=Mtik::mtik_cmd('/interface/wireless/access-list/set',\%attrs4);
 							sleep ($api_delay);
@@ -457,6 +464,7 @@ foreach my $key (@networks) {
 						if ( $wireless_dhcp{$id}{'server'} ne $server )		{ $wireless_dhcp{$id}{'server'}=$server;	$poprawic_wpis_dhcp+= 8;	$attrs8{'server'}=$server; }
                                                 if ( $poprawic_wpis_dhcp and $wireless_dhcp{$id}{'LMS'} < 2 ) {
                                                         if (!$quiet) { print STDERR "dhcp jest do poprawy ($poprawic_wpis_dhcp) -> "; }
+                                                        if ($info) { print STDERR "dhcp jest do poprawy ($poprawic_wpis_dhcp) -> "; }
                                                         $attrs8{'.id'} = $id;
                                                         # przed zapisaniem zmian wpis ma byc disabled, a na koniec enabled by ominac error
                                                         $attrs8{'disabled'} = 'yes';
@@ -511,9 +519,6 @@ foreach my $key (@networks) {
 				if ($arp_enable) {
                                     my $poprawic_wpis_arp=0;
 				    foreach my $id (keys (%wireless_arp)) {
-#                                        if ( ($wireless_arp{$id}{'mac-address'} eq $cmac ) || ($wireless_arp{$id}{'address'} eq ($ipaddr || $ipaddr_pub)) ) {
-#                                        if ( (($wireless_arp{$id}{'mac-address'} eq $cmac ) || ($wireless_arp{$id}{'address'} eq $ipaddr)) and $wireless_arp{$id}{'comment'} !=~ m/dodatkowy$/) {
-#                                        if ( (($wireless_arp{$id}{'mac-address'} eq $cmac ) || ($wireless_arp{$id}{'address'} eq $ipaddr)) and $wireless_arp{$id}{'comment'} =~ m/podstawowy$/) {
                                         if ( ($wireless_arp{$id}{'mac-address'} eq $cmac ) || ($wireless_arp{$id}{'address'} eq $ipaddr) ) {
                                                 if (!$quiet) { print STDERR "arp istnieje -> "; }
                                                 $dopisany=1;
@@ -527,6 +532,7 @@ foreach my $key (@networks) {
 						if ( $wireless_arp{$id}{'interface'} ne $iface )	{ $wireless_arp{$id}{'interface'}=$iface;	$poprawic_wpis_arp+= 8;	 $attrs8{'interface'}=$iface; }
                                                 if ( $poprawic_wpis_arp and $wireless_arp{$id}{'LMS'} < 2 ) {
                                                         if (!$quiet) { print STDERR "arp jest do poprawy ($poprawic_wpis_arp) -> "; }
+                                                        if ($info) { print STDERR "arp jest do poprawy ($poprawic_wpis_arp) -> "; }
                                                         $attrs8{'.id'} = $id;
                                                         # przed zapisaniem zmian wpis ma byc disabled, a na koniec enabled by ominac error
                                                         $attrs8{'disabled'} = 'yes';
@@ -568,38 +574,9 @@ foreach my $key (@networks) {
 #						print " error: $Mtik::error_msg\n";
                                                 }
                                         else { if (!$quiet) { print STDERR "OK(add_arp) "; } }
-# arp z dodatkowego pola:
-#					if ($ipaddr_pub ne "0.0.0.0") 
-#					{ 
-##                                	    print STDERR "ip: $ipaddr $ipaddr_pub ";
-#                                    	    print STDERR "brak arp, dodaje -> ";
-#					    my %attrs13; 
-#					    $attrs13{'address'} = $ipaddr_pub; 
-#					    $attrs13{'mac-address'} = $cmac; 
-#					    $attrs13{'comment'} = $name.":dodatkowy";
-#					    $attrs13{'interface'} = $iface; 
-#					    my($retval13,@results3)=Mtik::mtik_cmd('/ip/arp/add',\%attrs13);
-#                                    	    sleep ($api_delay);
-#                                	    print STDERR "ret: $retval13 -> ";
-#                                    	    if ($retval13 != 1) {
-#                                                print "BLAD przy dodawaniu wpisu arp!! || "; 
-##						print " error: $Mtik::error_msg\n";
-#                                                }
-#                                        else { if (!$quiet) { print STDERR "OK(add_arp) \n "; } }
-#                                	}
 
                                 	} #endof if (!$dopisany and $arp_enable)
 ####### arp ^
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -622,6 +599,7 @@ foreach my $key (@networks) {
 						if ( $wireless_bloklista{$id}{'comment'} ne $name )	{ $wireless_bloklista{$id}{'comment'}=$name;	$poprawic_wpis_bloklista+= 2;	 $attrs15{'comment'}=$name; }
                                                 if ( $poprawic_wpis_bloklista and $wireless_bloklista{$id}{'LMS'} < 2 ) {
                                                         if (!$quiet) { print STDERR "wpis w blokliscie jest do poprawy ($poprawic_wpis_bloklista) -> "; }
+                                                        if ($info) { print STDERR "wpis w blokliscie jest do poprawy ($poprawic_wpis_bloklista) -> "; }
                                                         $attrs15{'.id'} = $id;
                                                         # przed zapisaniem zmian wpis ma byc disabled, a na koniec enabled by ominac error
                                                         $attrs15{'disabled'} = 'yes';
@@ -709,8 +687,8 @@ foreach my $key (@networks) {
 					if ( $wireless_queues{$name_kolejka}{'time'} ne $simple_time )      { $wireless_queues{$name_kolejka}{'time'}=$simple_time;     $poprawic_wpis_simple+= 4;  $attrs5{'time'} = $simple_time; }
 					if ( $wireless_queues{$name_kolejka}{'target'} ne $ipaddr_32 )      { $wireless_queues{$name_kolejka}{'target'}=$ipaddr_32;  	$poprawic_wpis_simple+= 2;  $attrs5{'target'} = $ipaddr_32; }
 					if ( $poprawic_wpis_simple ) {
-
 						if (!$quiet) { print STDERR "queue jest do poprawy ($poprawic_wpis_simple): "; }
+						if ($info) { print STDERR "queue jest do poprawy ($poprawic_wpis_simple): "; }
 				    		    $attrs5{'.id'}=$wireless_queues{$name_kolejka}{'.id'};
 						    my($retval5,@results5)=Mtik::mtik_cmd('/queue/simple/set',\%attrs5);
 						    sleep ($api_delay);
@@ -742,6 +720,7 @@ foreach my $key (@networks) {
 					if ( $wireless_queues{$name_kolejka."_\$"}{'time'} ne $simple_time_n )          { $wireless_queues{$name_kolejka."_\$"}{'time'}=$simple_time_n;         $poprawic_wpis_simple_n+= 4;  $attrs11{'time'} = $simple_time_n; }
 					if ( $poprawic_wpis_simple_n ) {
 						if (!$quiet) { print STDERR "queue_n jest do poprawy: "; }
+						if ($info) { print STDERR "queue_n jest do poprawy: "; }
 #						if (!$quiet) { print STDERR "($poprawic_wpis_simple_n ,$w,$ipaddr_32,): "; }
 				    		    $attrs11{'.id'}=$wireless_queues{$name_kolejka."_\$"}{'.id'};
 						    my($retval11,@results11)=Mtik::mtik_cmd('/queue/simple/set',\%attrs11);
@@ -771,34 +750,8 @@ foreach my $key (@networks) {
 ####### queue ^
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 			} # end of if(matchip($row2->{'ipaddr'},$row->{'address'},$row->{'mask'})) 
 		} # end of while (my $row2 = $dbq2->fetchrow_hashref()) 
-
-
-
-
 
 
 
@@ -825,7 +778,7 @@ foreach my $key (@networks) {
 	    		$ipjestwsieci = matchip($wireless_dhcp{$id}{'address'},$address,$mask);
 #print STDERR "\n . $ipjestwsieci . net: $address maska: $mask . ip: $wireless_dhcp{$id}{'address'} \n";
                         if ($wireless_dhcp{$id}{'LMS'} < 1 and $ipjestwsieci) {
-                                print STDERR "uwaga dhcp: $wireless_dhcp{$id}{'LMS'} | ";
+#                                print STDERR "uwaga dhcp: $wireless_dhcp{$id}{'LMS'} | ";
                                 print STDERR "usuwam zbedne dhcp: $wireless_dhcp{$id}{'mac-address'} -> ";
                                 my %attrs9; $attrs9{'.id'}=$wireless_dhcp{$id}{'.id'};
                                 my($retval9,@results9)=Mtik::mtik_cmd('/ip/dhcp-server/lease/remove',\%attrs9);
@@ -999,42 +952,42 @@ sub taryfy($$) {
 	if($max_id > 0 ) {
 		return $max_id;
 	}
-
-	# nie znaleziono aktywnej taryfy wiec szukam jeszcze nie rozpoczetych
-	$dbq1 = $dbase->prepare("SELECT tariffid FROM assignments WHERE customerid = $user_id AND suspended = 0");
-	$dbq1->execute();
-	while (my $row1 = $dbq1->fetchrow_hashref()) {
-		$tariff_id = $row1->{'tariffid'};
-		my $dbq2 = $dbase->prepare("SELECT id, downceil  FROM tariffs WHERE id = $row1->{'tariffid'}");
-		$dbq2->execute();
-		while ( my $row2 = $dbq2->fetchrow_hashref()) {
-			# szukamy najwiêkszej taryfy
-			if ( $row2->{'downceil'} > $max_down ) {
-				$max_down = $row2->{'downceil'};
-				$max_id = $row2->{'id'};
-			}
-		}
-	}
-	# je¶li zosta³a jaka¶ taryfa z id > 0 to zwróc i zakoñcz
-	if($max_id > 0 ) {
-		return $max_id;
-	}
-
-	# ostatnia deska ratunku - taryfa zawieszona
-	$dbq1 = $dbase->prepare("SELECT tariffid FROM assignments WHERE customerid = $user_id");
-	$dbq1->execute();
-	while (my $row1 = $dbq1->fetchrow_hashref()) {
-		$tariff_id = $row1->{'tariffid'};
-		my $dbq2 = $dbase->prepare("SELECT id, downceil  FROM tariffs WHERE id = $row1->{'tariffid'}");
-		$dbq2->execute();
-		while ( my $row2 = $dbq2->fetchrow_hashref()) {
-			# szukamy najwiêkszej taryfy
-			if ( $row2->{'downceil'} > $max_down ) {
-				$max_down = $row2->{'downceil'};
-				$max_id = $row2->{'id'};
-			}
-		}
-	}
+# wychaszowane, by wyciagac tylko aktywna taryfe
+#	# nie znaleziono aktywnej taryfy wiec szukam jeszcze nie rozpoczetych
+#	$dbq1 = $dbase->prepare("SELECT tariffid FROM assignments WHERE customerid = $user_id AND suspended = 0");
+#	$dbq1->execute();
+#	while (my $row1 = $dbq1->fetchrow_hashref()) {
+#		$tariff_id = $row1->{'tariffid'};
+#		my $dbq2 = $dbase->prepare("SELECT id, downceil  FROM tariffs WHERE id = $row1->{'tariffid'}");
+#		$dbq2->execute();
+#		while ( my $row2 = $dbq2->fetchrow_hashref()) {
+#			# szukamy najwiêkszej taryfy
+#			if ( $row2->{'downceil'} > $max_down ) {
+#				$max_down = $row2->{'downceil'};
+#				$max_id = $row2->{'id'};
+#			}
+#		}
+#	}
+#	# je¶li zosta³a jaka¶ taryfa z id > 0 to zwróc i zakoñcz
+#	if($max_id > 0 ) {
+#		return $max_id;
+#	}
+#
+#	# ostatnia deska ratunku - taryfa zawieszona
+#	$dbq1 = $dbase->prepare("SELECT tariffid FROM assignments WHERE customerid = $user_id");
+#	$dbq1->execute();
+#	while (my $row1 = $dbq1->fetchrow_hashref()) {
+#		$tariff_id = $row1->{'tariffid'};
+#		my $dbq2 = $dbase->prepare("SELECT id, downceil  FROM tariffs WHERE id = $row1->{'tariffid'}");
+#		$dbq2->execute();
+#		while ( my $row2 = $dbq2->fetchrow_hashref()) {
+#			# szukamy najwiêkszej taryfy
+#			if ( $row2->{'downceil'} > $max_down ) {
+#				$max_down = $row2->{'downceil'};
+#				$max_id = $row2->{'id'};
+#			}
+#		}
+#	}
 	# jesli tariff_id = 0 to nie znalaz³ taryfy
 	return $max_id;
 }
