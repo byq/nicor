@@ -1,5 +1,14 @@
 #!/usr/bin/perl
 
+#
+# do poprawnej pracy w LMS musza byc przepustowosci wpisane bez zaokraglania 
+# czyli 1024k, zamiast 1000k
+# MT zamienia przepustowosci z k na M i funkcja porownujaca nie dziala poprawnie
+#
+# testowane z RB750GL ver 6.4 i LMS 1.10.4
+#
+# dodac tablice arp
+#
 
 use strict;
 use DBI;
@@ -21,7 +30,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.0.x';
+my $_version = '2.1.10';
 
 my %options = (
 	"--config-file|C=s"	=>	\$configfile,
@@ -39,8 +48,8 @@ if($help) {
 	print STDERR <<EOF;
 mikrotik, version $_version
 (C) 2001-2006 LMS Developers
-(C) 2009-2010 Emers, Wojtek
-(C) 2013-2014 byq
+(C) 2009-20xx Emers, Wojtek
+(C) 2014 byq
 
 -C, --config-file=/etc/lms/lms.ini	alternate config file (default: /etc/lms/lms.ini);
 -l, --mklist=/etc/lms/mikrotik.list	mikrotik's list file (default: /etc/lms/mikrotik.list);
@@ -58,22 +67,27 @@ if($version) {
 mikrotik, version $_version
 (C) 2001-2006 LMS Developers
 (C) 2009-20xx Emers, Wojtek
+(C) 2013 byq
+
 EOF
 	exit 0;
 }
 
 if(!$configfile) {
-	$configfile = "/etc/lms/lms.ini";
+	$configfile = "/etc/lms-remote-ptlanet/lms.ini";
+#	$configfile = "/etc/lms/lms.ini";
 }
 
 if(!$mklistfile) {
-	$mklistfile = "/etc/lms/mikrotik.list";
+	$mklistfile = "/etc/lms-remote-ptlanet/mikrotik.list";
+#	$mklistfile = "/etc/lms/mikrotik.list";
 }
 
 if(!$quiet) {
 	print STDOUT "mikrotik, version $_version\n";
 	print STDOUT "(C) Copyright 2001-2006 LMS Developers\n";
 	print STDOUT "(C) Copyright 2009-20xx Emers\n";
+	print STDOUT "(C) 2013 byq\n";
 	print STDOUT "Using file $configfile as config.\n";
 	print STDOUT "Using file $mklistfile as mikrotik's list.\n";
 }
@@ -110,9 +124,10 @@ my $aclprefix='LMS';	# przefix dodawany do wpisów generowanych automatycznie, pr
 my $tariff_mult=1;	# mno¿nik uploadu i downloadu, dobrze ustawiæ >1, by MT nie traci³ mocy CPU na zarz±dzanie pasmem, gdy u¿ytkownik osi±ga warto¶æ graniczn± taryfy
 my $macs_usunac='MT-';	# ignoruj urz±dzenia z tym prefixem w polu name, najczê¶ciej to sprzêt sieciowy, którego nie trzeba ograniczaæ
 my $api_delay=0;	# czas (w sekundach) oczekiwania po zmianie/dokonaniu wpisu
-my $acl_enable=0; 	# czy zarzadzac accesslista
+my $acl_enable=1; 	# czy zarzadzac accesslista
 my $queue_enable=0; 	# czy zarzadzac kolejkami
-my $dhcp_enable=1;	# czy zarzadzac dhcp
+my $dhcp_enable=0;	# czy zarzadzac dhcp
+my $arp_enable=1;	# czy zarzadzac arp
 
 #domy¶lne ustawienia regu³ki interface wireless access-list
 my $macs_private_algo='none';
@@ -137,12 +152,16 @@ my $simple_interface = 'all';
 my $simple_parent = 'none';
 my $simple_priority = '8';
 my $simple_queue = 'default-small/default-small';
-my $simple_time = '8h-1d,sun,mon,tue,wed,thu,fri,sat';
+my $simple_time = '12h-1d,sun,mon,tue,wed,thu,fri,sat';
+my $simple_time_n = '0s-12h,sun,mon,tue,wed,thu,fri,sat';
 my $simple_total_queue = 'default-small';
 
 #domyslne ustawienia regulki dhcp-server lease
 
+#		print STDERR " test 1";
+
 if ( polacz_z_baza() ) {
+#		print STDERR " test 2";
 	open(FILE, "$mklistfile");
 	my @list = <FILE>;
 	close(FILE);
@@ -154,20 +173,22 @@ if ( polacz_z_baza() ) {
 		$mkuser = pop(@mkdata);
 		$mkhost = pop(@mkdata);
 		$hostname = pop(@mkdata);
-#print STDERR "test1 \n";
+#		print STDERR " test 3";
 
 		if(sprawdz_zmiany() or $force) {
 			if(!$quiet) { print STDERR "Konieczne przeladowanie mk: $hostname, host: $mkhost, user: $mkuser, pass: *****\n"; }
 			if (Mtik::login($mkhost,$mkuser,$mkpass)) {
-
-
-
+#		print STDERR " test 4";
 
 
 if(!$quiet) { print STDERR "Zalogowano\n"; }
 if(!$quiet and $acl_enable) { print STDERR "Aktualnie dodane wpisy do access listy:\n---------------------------------------\n"; }
 my(%wireless_macs) = Mtik::get_by_key('/interface/wireless/access-list/print','.id');
+
+#		print STDERR " error: $Mtik::error_msg\n";
+
 if ($Mtik::error_msg eq '' and $acl_enable) {
+#		    print STDERR " acl enable\n"; 
 	foreach my $id (keys (%wireless_macs)) {
 		if(!$quiet) { print STDERR " ID: $id\n"; }
 		# zaznaczamy domy¶lnie ka¿dy wpis do usuniêcia
@@ -176,26 +197,13 @@ if ($Mtik::error_msg eq '' and $acl_enable) {
 		else { $wireless_macs{$id}{'LMS'} = '0'; }
 	}
 }
-if(!$quiet and $dhcp_enable) { print STDERR "Aktualnie dodane wpisy do serwera dhcp:\n---------------------------------------\n"; }
-
-my(%wireless_dhcp) = `ssh -l admin-ssh -i ./mt-test 192.168.44.2 "/ip dhcp-server lease print" | grep -v "Flags" | grep -v "ADDRESS" | grep -v '^[[:space:]]\*\$'`;
-
-#if ($Mtik::error_msg eq '' and $dhcp_enable) {
-#	foreach my $id (keys (%wireless_dhcp)) {
-	foreach my $id (%wireless_dhcp) {
-		if(!$quiet) { 
-		print STDERR " ID: $id "; 
-		}
-		# zaznaczamy domyslnie kazdy wpis do usuniecia
-#		$_=$wireless_dhcp{$id}{'comment'};
-#		if (/$macs_usunac/) { $wireless_dhcp{$id}{'LMS'} = '2'; }
-#		else { $wireless_dhcp{$id}{'LMS'} = '0'; }
-	}
-#}
-
 if(!$quiet and $queue_enable) { print STDERR "\nAktualnie dodane kolejki queue simple:\n--------------------------------------\n"; }
 my(%wireless_queues) = Mtik::get_by_key('/queue/simple/print','name');
+
+#B		print STDERR " error: $Mtik::error_msg\n";
+
 if ($Mtik::error_msg eq '' and $queue_enable) {
+#		    print STDERR " queue enable\n"; 
 	foreach my $name_queues (keys (%wireless_queues)) {
 		if(!$quiet) { print STDERR " Name: $name_queues\n"; }
 		# zaznaczamy domy¶lnie ka¿dy wpis do usuniêcia
@@ -205,16 +213,49 @@ if ($Mtik::error_msg eq '' and $queue_enable) {
 	}
 }
 
-# koniec aktualnych danych
+if(!$quiet and $dhcp_enable) { print STDERR "Aktualnie dodane wpisy do serwera dhcp:\n---------------------------------------\n"; }
+my(%wireless_dhcp) = Mtik::get_by_key('/ip/dhcp-server/lease/print','.id');
+
+#		print STDERR " error: $Mtik::error_msg\n";
+
+if ($Mtik::error_msg eq '' and $dhcp_enable) {
+#		    print STDERR " dhcp enable\n"; 
+	foreach my $id (keys (%wireless_dhcp)) {
+		if(!$quiet) { 
+		    print STDERR " ID: $id\n"; 
+		}
+		# zaznaczamy domyslnie kazdy wpis do usuniecia
+		$_=$wireless_dhcp{$id}{'comment'};
+		if (/$macs_usunac/) { $wireless_dhcp{$id}{'LMS'} = '2'; }
+		else { $wireless_dhcp{$id}{'LMS'} = '0'; }
+	}
+}
+
+if(!$quiet and $arp_enable) { print STDERR "Aktualnie dodane wpisy arp:\n---------------------------------------\n"; }
+my(%wireless_arp) = Mtik::get_by_key('/ip/arp/print','.id');
+
+#		print STDERR " error: $Mtik::error_msg\n";
+
+if ($Mtik::error_msg eq '' and $arp_enable) {
+		    print STDERR " arp enable\n"; 
+	foreach my $id (keys (%wireless_arp)) {
+		if(!$quiet) { 
+		    print STDERR " ID: $id\n"; 
+		}
+		# zaznaczamy domyslnie kazdy wpis do usuniecia
+		$_=$wireless_arp{$id}{'comment'};
+		if (/$macs_usunac/) { $wireless_arp{$id}{'LMS'} = '2'; }
+		else { $wireless_arp{$id}{'LMS'} = '0'; }
+	}
+}
 
 
-
-if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable )) { print STDERR "\n";}
+if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable )) { print STDERR "\n";}
 my @networks = split ' ', $mknetl;
 foreach my $key (@networks) {
 	my $dbq = $dbase->prepare("SELECT id, inet_ntoa(address) AS address, mask, interface, domain  FROM networks WHERE name = UPPER('$key')");
 	$dbq->execute();
-	if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable ) ) { print STDERR "Sprawdzam siec: $key\n";}
+	if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable ) ) { print STDERR "Sprawdzam siec: $key\n";}
 	while (my $row = $dbq->fetchrow_hashref()) {
 		my $dbq2 = $dbase->prepare("SELECT id, name, ipaddr, mac, ownerid FROM nodes WHERE name not like '%$macs_usunac%' ORDER BY ipaddr ASC");
 		$dbq2->execute();
@@ -233,136 +274,173 @@ foreach my $key (@networks) {
 				# ustawiamy domy¶ln± predko¶æ, nawet jak kto¶ nie ma taryfy, aby wy¶wietla³y siê strony serwisowe
 				my $down=$def_down;
 				my $up=$def_up;
-				my $dbq3 = $dbase->prepare("SELECT uprate, downrate, upceil, downceil FROM tariffs WHERE id=$taryfa");
+				my $down_n=$def_down;
+				my $up_n=$def_up;
+				my $dbq3 = $dbase->prepare("SELECT upceil, downceil, upceil_n, downceil_n FROM tariffs WHERE id=$taryfa");
 				$dbq3->execute();
 				while (my $row3 = $dbq3->fetchrow_hashref()) {
 					$down = $row3->{'downceil'} * $tariff_mult;
 					$up = $row3->{'upceil'} * $tariff_mult;
+					if (!$row3->{'downceil_n'}) {$down_n = $down; }
+					else {
+					    $down_n = $row3->{'downceil_n'} * $tariff_mult;
+					    }
+					if (!$row3->{'upceil_n'}) {$up_n = $up; }
+					else {
+					    $up_n = $row3->{'upceil_n'} * $tariff_mult;
+					    }
 				}
+# tutaj up i down trzeba podzielic przez 1000 i jezeli jest bez reszty to k zamienic na M i rozwiaze sie problem zaokraglania przez MT
 				my $max_limit= $up."k/".$down."k";
+				my $max_limit_n= $up_n."k/".$down_n."k";
 				if (!$quiet and $acl_enable) { print STDERR "$cmac @ $iface <-> "; }
-
 				# szukamy czy mamy ju¿ zarejestrowany komputer na MT
 				my $zarejestrowany = 0 ;
-#				if ($acl_enable) {
-#				    foreach my $id (keys (%wireless_macs)) {
-#					if ( ($wireless_macs{$id}{'mac-address'} eq $cmac ) and ( $wireless_macs{$id}{'interface'} eq $iface) ) {
-#						if (!$quiet) { print STDERR "acl istnieje -> "; }
-#						$zarejestrowany=1;
-#						my $poprawic_wpis=0;
-#						my %attrs4;
-#						# je¶li ju¿ dodany, to trzeba sprawdziæ wszystkie atrybuty i ewentualnie poprawiæ
-#						# maca i interfejsu nie sprawdzamy bo zrobili¶my to wcze¶niej
-#						if ( $wireless_macs{$id}{'private-algo'} ne $macs_private_algo )                     { $wireless_macs{$id}{'private-algo'}=$macs_private_algo;                      $poprawic_wpis+= 1;   $attrs4{'private-algo'}=$macs_private_algo; }
-#						if ( $wireless_macs{$id}{'disabled'} ne $macs_disabled )                             { $wireless_macs{$id}{'disabled'}=$macs_disabled ;                             $poprawic_wpis+= 2;   $attrs4{'disabled'}=$macs_disabled; }
-#						if ( $wireless_macs{$id}{'forwarding'} ne $macs_forwarding )                         { $wireless_macs{$id}{'forwarding'}=$macs_forwarding ;                         $poprawic_wpis+= 4;   $attrs4{'forwarding'}=$macs_forwarding; }
-#						if ( $wireless_macs{$id}{'authentication'} ne $macs_authentication )                 { $wireless_macs{$id}{'authentication'}=$macs_authentication ;                 $poprawic_wpis+= 8;   $attrs4{'authentication'}=$macs_authentication; }
-#						if ( $wireless_macs{$id}{'client-tx-limit'} ne $macs_client_tx_limit )               { $wireless_macs{$id}{'client-tx-limit'}=$macs_client_tx_limit;                $poprawic_wpis+= 16;  $attrs4{'client-tx-limit'}=$macs_client_tx_limit; }
-#						if ( $wireless_macs{$id}{'ap-tx-limit'} ne $macs_ap_tx_limit )                       { $wireless_macs{$id}{'ap-tx-limit'}=$macs_ap_tx_limit;                        $poprawic_wpis+= 32;  $attrs4{'ap-tx-limit'}=$macs_ap_tx_limit; }
-#						if ( $wireless_macs{$id}{'signal-range'} ne $macs_signal_range )                     { $wireless_macs{$id}{'signal-range'}=$macs_signal_range;                      $poprawic_wpis+= 64;  $attrs4{'signal-range'}=$macs_signal_range; }
-#						if ( $wireless_macs{$id}{'private-pre-shared-key'} ne $macs_private_pre_shared_key ) { $wireless_macs{$id}{'private-pre-shared-key'}=$macs_private_pre_shared_key ; $poprawic_wpis+= 128; $attrs4{'private-pre-shared-key'}=$macs_private_pre_shared_key; }
-#						if ( $wireless_macs{$id}{'private-key'} ne $macs_private_key )                       { $wireless_macs{$id}{'private-key'}=$macs_private_key;                        $poprawic_wpis+= 256; $attrs4{'private-key'}=$macs_private_key; }
-#						if ( $wireless_macs{$id}{'comment'} ne $name )                                       { $wireless_macs{$id}{'comment'}=$name;                                        $poprawic_wpis+= 512; $attrs4{'comment'}=$name; }
-#						if ( $poprawic_wpis and $wireless_macs{$id}{'LMS'} < 2 ) {
-#							if (!$quiet) { print STDERR "acl jest do poprawy ($poprawic_wpis) -> "; }
-#							$attrs4{'.id'} = $id;
-#							my($retval4,@results4)=Mtik::mtik_cmd('/interface/wireless/access-list/set',\%attrs4);
-#							sleep ($api_delay);
-#							print STDERR "ret: $retval4 -> ";
-#							if ($retval4 != 1) {
-#								print STDERR "BLAD przy zmianie acl! || "; }
-#							else { if (!$quiet) { print STDERR "OK(set_acl) || "; } }
-#						}
-#						else { if (!$quiet) { print STDERR "OK || "; } }
-#						$wireless_macs{$id}{'LMS'} = 1;
-#					} # end of if ( ($wireless_macs{$id}{'mac-address'} eq $cmac ) and ( $wireless_macs{$id}{'interface'} eq $iface) ) {
-#				    } # end of foreach my $id (keys (%wireless_macs)) {
-#				} #end of if ($acl_enable) {
-#
-#				if (!$zarejestrowany and $acl_enable) {
-#					print STDERR "brak acl -> ";
-#					my %attrs2; $attrs2{'mac-address'}=$cmac; $attrs2{'comment'}=$name; $attrs2{'disabled'}=$macs_disabled; $attrs2{'ap-tx-limit'}=$macs_ap_tx_limit; $attrs2{'authentication'}=$macs_authentication; $attrs2{'client-tx-limit'}=$macs_client_tx_limit; $attrs2{'forwarding'}=$macs_forwarding; $attrs2{'interface'}=$iface; $attrs2{'private-algo'}=$macs_private_algo; $attrs2{'private-key'}=$macs_private_key; $attrs2{'private-pre-shared-key'}=$macs_private_pre_shared_key; $attrs2{'signal-range'}=$macs_signal_range;
-#					my($retval2,@results2)=Mtik::mtik_cmd('/interface/wireless/access-list/add',\%attrs2);
-#					sleep ($api_delay);
-#					print STDERR "ret: $retval2 -> ";
-#					if ($retval2 < 2) {
-#						if (!$quiet) { print STDERR "OK(add_acl) || "; }
-#					}
-#					else { print "BLAD!(add_acl) || "; }
-#				}
 
+####### acl v
+				if ($acl_enable) {
+				    foreach my $id (keys (%wireless_macs)) {
+					if ( ($wireless_macs{$id}{'mac-address'} eq $cmac ) and ( $wireless_macs{$id}{'interface'} eq $iface) ) {
+						if (!$quiet) { print STDERR "acl istnieje -> "; }
+						$zarejestrowany=1;
+						my $poprawic_wpis=0;
+						my %attrs4;
+						# je¶li ju¿ dodany, to trzeba sprawdziæ wszystkie atrybuty i ewentualnie poprawiæ
+						# maca i interfejsu nie sprawdzamy bo zrobili¶my to wcze¶niej
+						if ( $wireless_macs{$id}{'private-algo'} ne $macs_private_algo )                     { $wireless_macs{$id}{'private-algo'}=$macs_private_algo;                      $poprawic_wpis+= 1;   $attrs4{'private-algo'}=$macs_private_algo; }
+						if ( $wireless_macs{$id}{'disabled'} ne $macs_disabled )                             { $wireless_macs{$id}{'disabled'}=$macs_disabled ;                             $poprawic_wpis+= 2;   $attrs4{'disabled'}=$macs_disabled; }
+						if ( $wireless_macs{$id}{'forwarding'} ne $macs_forwarding )                         { $wireless_macs{$id}{'forwarding'}=$macs_forwarding ;                         $poprawic_wpis+= 4;   $attrs4{'forwarding'}=$macs_forwarding; }
+						if ( $wireless_macs{$id}{'authentication'} ne $macs_authentication )                 { $wireless_macs{$id}{'authentication'}=$macs_authentication ;                 $poprawic_wpis+= 8;   $attrs4{'authentication'}=$macs_authentication; }
+						if ( $wireless_macs{$id}{'client-tx-limit'} ne $macs_client_tx_limit )               { $wireless_macs{$id}{'client-tx-limit'}=$macs_client_tx_limit;                $poprawic_wpis+= 16;  $attrs4{'client-tx-limit'}=$macs_client_tx_limit; }
+						if ( $wireless_macs{$id}{'ap-tx-limit'} ne $macs_ap_tx_limit )                       { $wireless_macs{$id}{'ap-tx-limit'}=$macs_ap_tx_limit;                        $poprawic_wpis+= 32;  $attrs4{'ap-tx-limit'}=$macs_ap_tx_limit; }
+						if ( $wireless_macs{$id}{'signal-range'} ne $macs_signal_range )                     { $wireless_macs{$id}{'signal-range'}=$macs_signal_range;                      $poprawic_wpis+= 64;  $attrs4{'signal-range'}=$macs_signal_range; }
+						if ( $wireless_macs{$id}{'private-pre-shared-key'} ne $macs_private_pre_shared_key ) { $wireless_macs{$id}{'private-pre-shared-key'}=$macs_private_pre_shared_key ; $poprawic_wpis+= 128; $attrs4{'private-pre-shared-key'}=$macs_private_pre_shared_key; }
+						if ( $wireless_macs{$id}{'private-key'} ne $macs_private_key )                       { $wireless_macs{$id}{'private-key'}=$macs_private_key;                        $poprawic_wpis+= 256; $attrs4{'private-key'}=$macs_private_key; }
+						if ( $wireless_macs{$id}{'comment'} ne $name )                                       { $wireless_macs{$id}{'comment'}=$name;                                        $poprawic_wpis+= 512; $attrs4{'comment'}=$name; }
+						if ( $poprawic_wpis and $wireless_macs{$id}{'LMS'} < 2 ) {
+							if (!$quiet) { print STDERR "acl jest do poprawy ($poprawic_wpis) -> "; }
+							$attrs4{'.id'} = $id;
+							my($retval4,@results4)=Mtik::mtik_cmd('/interface/wireless/access-list/set',\%attrs4);
+							sleep ($api_delay);
+							print STDERR "ret: $retval4 -> ";
+							if ($retval4 != 1) {
+								print STDERR "BLAD przy zmianie acl! || "; }
+							else { if (!$quiet) { print STDERR "OK(set_acl) || "; } }
+						}
+						else { if (!$quiet) { print STDERR "OK || "; } }
+						$wireless_macs{$id}{'LMS'} = 1;
+					} # end of if ( ($wireless_macs{$id}{'mac-address'} eq $cmac ) and ( $wireless_macs{$id}{'interface'} eq $iface) ) {
+				    } # end of foreach my $id (keys (%wireless_macs)) {
+				} #end of if ($acl_enable) {
 
+				if (!$zarejestrowany and $acl_enable) {
+					print STDERR "brak acl -> ";
+					my %attrs2; 
+					$attrs2{'mac-address'}=$cmac; 
+					$attrs2{'comment'}=$name; 
+					$attrs2{'disabled'}=$macs_disabled; 
+					$attrs2{'ap-tx-limit'}=$macs_ap_tx_limit; 
+					$attrs2{'authentication'}=$macs_authentication; 
+					$attrs2{'client-tx-limit'}=$macs_client_tx_limit; 
+					$attrs2{'forwarding'}=$macs_forwarding; 
+					$attrs2{'interface'}=$iface; 
+					$attrs2{'private-algo'}=$macs_private_algo; 
+					$attrs2{'private-key'}=$macs_private_key; 
+					$attrs2{'private-pre-shared-key'}=$macs_private_pre_shared_key; 
+					$attrs2{'signal-range'}=$macs_signal_range;
+					my($retval2,@results2)=Mtik::mtik_cmd('/interface/wireless/access-list/add',\%attrs2);
+					sleep ($api_delay);
+					print STDERR "ret: $retval2 -> ";
+#		print STDERR " error: $Mtik::error_msg\n";
+					if ($retval2 < 2) {
+						if (!$quiet) { print STDERR "OK(add_acl) || "; }
+					}
+					else { print "BLAD!(add_acl) || "; }
+				}
+####### acl ^
+
+####### dhcp v
 
 				my $dopisany = 0;
-#				if ($dhcp_enable) {
-#                                    my $poprawic_wpis_dhcp=0;
-#                                    # teraz musimy sprawdzic lease z dhcp-server
-#                                    # jesli mamy taki wpis, to porównujemy wartosci
-#				    foreach my $id (keys (%wireless_dhcp)) {
-#                                        if ( $wireless_dhcp{$id}{'mac-address'} eq $cmac ) {
-#                                                if (!$quiet) { print STDERR "dhcp istnieje -> "; }
-#                                                $dopisany=1;
-#                                                my $poprawic_wpis_dhcp=0;
-#                                                my %attrs8;
-#                                                # je¶li ju¿ dodany, to trzeba sprawdziæ wszystkie atrybuty i ewentualnie poprawiæ
-#                                                if ( $wireless_dhcp{$id}{'address'} ne $ipaddr )	{ $wireless_dhcp{$id}{'address'}=$ipaddr;	$poprawic_wpis_dhcp+= 1;	$attrs8{'address'}=$ipaddr; }
-#						if ( $wireless_dhcp{$id}{'server'} ne $key )		{ $wireless_dhcp{$id}{'server'}=$key;		$poprawic_wpis_dhcp+= 2;	$attrs8{'server'}=$key; }
-#						if ( $wireless_dhcp{$id}{'comment'} ne $name )		{ $wireless_dhcp{$id}{'comment'}=$name;		$poprawic_wpis_dhcp+= 4;	$attrs8{'comment'}=$name; }
-#                                                if ( $poprawic_wpis_dhcp and $wireless_dhcp{$id}{'LMS'} < 2 ) {
-#                                                        if (!$quiet) { print STDERR "dhcp jest do poprawy ($poprawic_wpis_dhcp) -> "; }
-#                                                        $attrs8{'.id'} = $id;
-#                                                        my($retval8,@results8)=Mtik::mtik_cmd('/ip/dhcp-server/lease/set',\%attrs8);
-#                                                        sleep ($api_delay);
-#                                                        print STDERR "ret: $retval8 -> ";
-#                                                        if ($retval8 != 1) {
-#                                                                print STDERR "BLAD przy zmianie wpisu dhcp! || "; }
-#                                                        else { if (!$quiet) { print STDERR "OK(set_dhcp) || "; } }
-#                                                }
-#                                                else { if (!$quiet) { print STDERR "OK || "; } }
-#                                                $wireless_dhcp{$id}{'LMS'} = 1;
-#                                        } # end of if ( ($wireless_macs{$id}{'mac-address'} eq $cmac ) and ( $wireless_macs{$id}{'interface'} eq $iface) ) {
-#                                    } # end of foreach my $id (keys (%wireless_macs)) {
-#				    }
+				if ($dhcp_enable) {
+                                    my $poprawic_wpis_dhcp=0;
+                                    # teraz musimy sprawdzic lease z dhcp-server
+                                    # jesli mamy taki wpis, to porównujemy wartosci
+				    # sprawdza istnienie mac lub ipaddr
+				    # problem: zmiana mac adresu pomiedzy istniejace IP - obejscie poprzez disable, 
+				    # a nastepnie enable, gdy bedzie kopia to error i remove
+				    foreach my $id (keys (%wireless_dhcp)) {
+                                        if ( ($wireless_dhcp{$id}{'mac-address'} eq $cmac ) || ($wireless_dhcp{$id}{'address'} eq $ipaddr) ) {
+                                                if (!$quiet) { print STDERR "dhcp istnieje -> "; }
+                                                $dopisany=1;
+                                                my $poprawic_wpis_dhcp=0;
+                                                my %attrs8;
+                                                # je¶li ju¿ dodany, to trzeba sprawdziæ wszystkie atrybuty i ewentualnie poprawiæ
+                                                if ( $wireless_dhcp{$id}{'address'} ne $ipaddr )	{ $wireless_dhcp{$id}{'address'}=$ipaddr;	$poprawic_wpis_dhcp+= 1;	$attrs8{'address'}=$ipaddr; }
+						if ( $wireless_dhcp{$id}{'mac-address'} ne $cmac )	{ $wireless_dhcp{$id}{'mac-address'}=$cmac;	$poprawic_wpis_dhcp+= 2;	$attrs8{'mac-address'}=$cmac; }
+						if ( $wireless_dhcp{$id}{'comment'} ne $name )		{ $wireless_dhcp{$id}{'comment'}=$name;		$poprawic_wpis_dhcp+= 4;	$attrs8{'comment'}=$name; }
+                                                if ( $poprawic_wpis_dhcp and $wireless_dhcp{$id}{'LMS'} < 2 ) {
+                                                        if (!$quiet) { print STDERR "dhcp jest do poprawy ($poprawic_wpis_dhcp) -> "; }
+                                                        $attrs8{'.id'} = $id;
+                                                        # przed zapisaniem zmian wpis ma byc disabled, a na koniec enabled by ominac error
+                                                        $attrs8{'disabled'} = 'yes';
+                                                        my($retval8,@results8)=Mtik::mtik_cmd('/ip/dhcp-server/lease/set',\%attrs8);
+                                                        sleep ($api_delay);
+                                                        print STDERR "ret: $retval8 -> ";
+                                                        if ($retval8 != 1) {
+                                                                print STDERR "BLAD przy zmianie wpisu dhcp! pewno jest juz taki mac lub ip|| "; }
+                                                        else { if (!$quiet) { print STDERR "OK(set_dhcp) || "; } }
+							# enable dla edytowanego wpisu
+                                                        $attrs8{'disabled'} = 'no';
+							my($retval8,@results8)=Mtik::mtik_cmd('/ip/dhcp-server/lease/set',\%attrs8);
+							# kasujemy disabled zakonczony errorem
+							my %attrs10;
+							$attrs10{'.id'} = $id;
+							if ($Mtik::error_msg) { Mtik::mtik_cmd('/ip/dhcp-server/lease/remove',\%attrs10 ) ;}
+                                                } # koniec poprawiania wpisow
+                                                else { if (!$quiet) { print STDERR "OK || "; } }
+                                                $wireless_dhcp{$id}{'LMS'} = 1;
 
+                                        } # end of if ( ($wireless_macs{$id}{'mac-address'} eq $cmac ) and ( $wireless_macs{$id}{'interface'} eq $iface) ) 
+                                    } # end of foreach my $id (keys (%wireless_macs)) 
+				    }
 				    if (!$dopisany and $dhcp_enable) {
                                         print STDERR "brak dhcp, dodaje -> ";
-					my %attrs7; $attrs7{'address'} = $ipaddr; $attrs7{'mac-address'} = $cmac; $attrs7{'server'} = $key; $attrs7{'comment'} = $name;
-#					my($retval7,@results7)=Mtik::mtik_cmd('/ip/dhcp-server/lease/add',\%attrs7);
-#/ip dhcp-server lease add address=$attrs7{'address'} mac-address=$attrs7{'mac-address'}
-#/ip dhcp-server lease add address=$attrs7{'address'} mac-address=$attrs7{'mac-address'} comment=$attrs7{'comment'}
-my($retval7,@results7)=`ssh -l admin-ssh -i ./mt-test 192.168.44.2 "
-/ip dhcp-server lease add address=$attrs7{'address'} mac-address=$attrs7{'mac-address'} comment=$attrs7{'comment'}
-"`;
-#my($retval7,@results7)=`ssh -l admin-ssh -i ./mt-test 192.168.44.2 "
-#/ip dhcp-server lease add address=$attrs7{'address'} mac-address=$attrs7{'mac-address'} server=$attrs7{'server'} comment=$attrs7{'comment'}
-#"`;
+					my %attrs7; 
+					$attrs7{'address'} = $ipaddr; 
+					$attrs7{'mac-address'} = $cmac; 
+#					$attrs7{'server'} = $key; 
+					$attrs7{'comment'} = $name;
+					my($retval7,@results7)=Mtik::mtik_cmd('/ip/dhcp-server/lease/add',\%attrs7);
                                         sleep ($api_delay);
                                         print STDERR "ret: $retval7 -> ";
-#                                        if ($retval7 != 1) {
-                                        if ($retval7) {
-                                                print "BLAD przy dodawaniu wpisu dhcp! || \n"; }
-                                        else { if (!$quiet) { print STDERR "OK(add_dhcp) || \n"; } }
+                                        if ($retval7 != 1) {
+                                                print "BLAD przy dodawaniu wpisu dhcp!! || "; 
+#						print " error: $Mtik::error_msg\n";
+                                                }
+                                        else { if (!$quiet) { print STDERR "OK(add_dhcp) || "; } }
                                 	}
+####### dhcp ^
 
-				
-
+####### queue v
 				if ($queue_enable) {
 				    my $poprawic_wpis_simple=0;
 				    # teraz musimy sprawdziæ kolejkê simple
 				    # jesli mamy taki wpis, to porównujemy warto¶ci
-				    # print STDERR ":1:$name_kolejka:2:$wireless_queues{$name_kolejka}{'name'}:3:";
+#				     print STDERR "1:$name_kolejka:2:$wireless_queues{$name_kolejka}{'name'}:";
+#				     print STDERR "3:$wireless_queues{$name_kolejka}{'max-limit'}:4:$max_limit:5:";
+### queue dzien v
 				    if ( defined ($wireless_queues{$name_kolejka}{'name'}) ) {
 					if (!$quiet) { print STDERR "queue istnieje -> "; }
 					my %attrs5;
-					if ( $wireless_queues{$name_kolejka}{'max-limit'} ne $max_limit )        { $wireless_queues{$name_kolejka}{'max-limit'}=$max_limit;        $poprawic_wpis_simple+= 1;  $attrs5{'max-limit'} = $max_limit; }
-					if ( $wireless_queues{$name_kolejka}{'target-addresses'} ne $ipaddr32 )  { $wireless_queues{$name_kolejka}{'target-addresses'}=$ipaddr32;  $poprawic_wpis_simple+= 2;  $attrs5{'target-addresses'} = $ipaddr32; }
-					if ( $wireless_queues{$name_kolejka}{'interface'} ne $simple_interface ) { $wireless_queues{$name_kolejka}{'interface'}=$simple_interface; $poprawic_wpis_simple+= 4;  $attrs5{'interface'} = $simple_interface; }
-					if ( $wireless_queues{$name_kolejka}{'time'} ne $simple_time )           { $wireless_queues{$name_kolejka}{'time'}=$simple_time;           $poprawic_wpis_simple+= 8;  $attrs5{'time'} = $simple_time; }
+					    if ( $wireless_queues{$name_kolejka}{'max-limit'} ne $max_limit )        { $wireless_queues{$name_kolejka}{'max-limit'}=$max_limit;        $poprawic_wpis_simple+= 1;  $attrs5{'max-limit'} = $max_limit; }
+					    if ( $wireless_queues{$name_kolejka}{'time'} ne $simple_time )           { $wireless_queues{$name_kolejka}{'time'}=$simple_time;           $poprawic_wpis_simple+= 8;  $attrs5{'time'} = $simple_time; }
+					if ( $wireless_queues{$name_kolejka}{'target'} ne $ipaddr32 )  { $wireless_queues{$name_kolejka}{'target'}=$ipaddr32;  $poprawic_wpis_simple+= 2;  $attrs5{'target'} = $ipaddr32; }
+
 					if ( $poprawic_wpis_simple ) {
 						if (!$quiet) { print STDERR "queue jest do poprawy ($poprawic_wpis_simple): "; }
 				    		    $attrs5{'.id'}=$wireless_queues{$name_kolejka}{'.id'};
 						    my($retval5,@results5)=Mtik::mtik_cmd('/queue/simple/set',\%attrs5);
-						    Mtik::mtik_cmd('/ip/dhcp-server/lease/add address=192.168.65.21 mac-address=00:00:00:11:11:11');
 						    sleep ($api_delay);
 						    if ($retval5 != 1) {
 							print STDERR "BLAD przy zmianie wpisu queue!\n"; }
@@ -372,9 +450,10 @@ my($retval7,@results7)=`ssh -l admin-ssh -i ./mt-test 192.168.44.2 "
 				    }
 				    else {
 					print STDERR "dodawanie queue -> ";
-					my %attrs1; $attrs1{'name'} = $name_kolejka; $attrs1{'target-addresses'} = $ipaddr; $attrs1{'max-limit'} = $max_limit; $attrs1{'burst-limit'} = $simple_burst_limit; $attrs1{'burst-threshold'} = $simple_burst_threshold; $attrs1{'burst-time'} = $simple_burst_time; 
-					# $attrs1{'disable'} = $simple_disable;
-					$attrs1{'direction'} = $simple_direction; $attrs1{'dst-address'} = $simple_dst_address; $attrs1{'interface'} = $simple_interface; $attrs1{'limit-at'} = $simple_limit_at; $attrs1{'parent'} = $simple_parent; $attrs1{'priority'} = $simple_priority; $attrs1{'queue'} = $simple_queue; $attrs1{'time'} = $simple_time;  $attrs1{'total-queue'} = $simple_total_queue;
+					my %attrs1; 
+					$attrs1{'name'} = $name_kolejka; $attrs1{'target'} = $ipaddr; $attrs1{'max-limit'} = $max_limit; $attrs1{'burst-limit'} = $simple_burst_limit; $attrs1{'burst-threshold'} = $simple_burst_threshold; $attrs1{'burst-time'} = $simple_burst_time; $attrs1{'disabled'} = $simple_disable;
+					$attrs1{'dst'} = $simple_dst_address; $attrs1{'limit-at'} = $simple_limit_at; $attrs1{'parent'} = $simple_parent; $attrs1{'priority'} = $simple_priority; $attrs1{'queue'} = $simple_queue; $attrs1{'time'} = $simple_time; $attrs1{'total-queue'} = $simple_total_queue;
+#					$attrs1{'direction'} = $simple_direction; $attrs1{'interface'} = $simple_interface; 
 					my($retval1,@results1)=Mtik::mtik_cmd('/queue/simple/add',\%attrs1);
 					sleep ($api_delay);
 					print STDERR "ret: $retval1 -> ";
@@ -382,10 +461,46 @@ my($retval7,@results7)=`ssh -l admin-ssh -i ./mt-test 192.168.44.2 "
 						print "BLAD przy dodawaniu queue!\n"; }
 					else { if (!$quiet) { print STDERR "OK(add_queue)\n"; } }
 				    }
+### queue dzien ^
+### queue noc v
+				    if ( defined ($wireless_queues{$name_kolejka."_\$"}{'name'}) ) {
+					if (!$quiet) { print STDERR "queue_n istnieje -> "; }
+					my %attrs11;
+					if ( $wireless_queues{$name_kolejka."_\$"}{'max-limit'} ne $max_limit_n )        { $wireless_queues{$name_kolejka."_\$"}{'max-limit'}=$max_limit_n;        $poprawic_wpis_simple+= 1;  $attrs11{'max-limit'} = $max_limit_n; }
+					if ( $wireless_queues{$name_kolejka."_\$"}{'target'} ne $ipaddr32 )  { $wireless_queues{$name_kolejka."_\$"}{'target'}=$ipaddr32;  $poprawic_wpis_simple+= 2;  $attrs11{'target'} = $ipaddr32; }
+					if ( $wireless_queues{$name_kolejka."_\$"}{'time'} ne $simple_time_n )           { $wireless_queues{$name_kolejka."_\$"}{'time'}=$simple_time_n;           $poprawic_wpis_simple+= 8;  $attrs11{'time'} = $simple_time_n; }
+					if ( $poprawic_wpis_simple ) {
+						if (!$quiet) { print STDERR "queue_n jest do poprawy ($poprawic_wpis_simple): "; }
+				    		    $attrs11{'.id'}=$wireless_queues{$name_kolejka."_\$"}{'.id'};
+						    my($retval11,@results11)=Mtik::mtik_cmd('/queue/simple/set',\%attrs11);
+						    sleep ($api_delay);
+						    if ($retval11 != 1) {
+							print STDERR "BLAD przy zmianie wpisu queue_n!\n"; }
+						    else { if (!$quiet) { print STDERR "OK(set_queue)\n"; } }
+					}
+					$wireless_queues{$name_kolejka."_\$"}{'LMS'} = 1; 
+				    }
+### queue noc ^
+				    else {
+					print STDERR "dodawanie queue_noc -> ";
+					my %attrs12; 
+					$attrs12{'name'} = $name_kolejka; $attrs12{'target'} = $ipaddr; $attrs12{'max-limit'} = $max_limit; $attrs12{'burst-limit'} = $simple_burst_limit; $attrs12{'burst-threshold'} = $simple_burst_threshold; $attrs12{'burst-time'} = $simple_burst_time; $attrs12{'disabled'} = $simple_disable;
+					$attrs12{'dst'} = $simple_dst_address; $attrs12{'limit-at'} = $simple_limit_at; $attrs12{'parent'} = $simple_parent; $attrs12{'priority'} = $simple_priority; $attrs12{'queue'} = $simple_queue; $attrs12{'time'} = $simple_time; $attrs12{'total-queue'} = $simple_total_queue;
+					$attrs12{'name'} = $name_kolejka."_\$"; $attrs12{'max-limit'} = $max_limit_n; $attrs12{'time'} = $simple_time_n;
+#					$attrs1{'direction'} = $simple_direction; $attrs1{'interface'} = $simple_interface; 
+					my($retval12,@results1)=Mtik::mtik_cmd('/queue/simple/add',\%attrs12);
+					sleep ($api_delay);
+					print STDERR "ret: $retval12 -> ";
+					if ($retval12 != 1) {
+						print "BLAD przy dodawaniu queue!\n"; }
+					else { if (!$quiet) { print STDERR "OK(add_queue)\n"; } }
+				    }
 				{ if (!$quiet) { print STDERR "OK \n"; } }
-				} # end of if ($queue_enable) {
-			} # end of if(matchip($row2->{'ipaddr'},$row->{'address'},$row->{'mask'})) {
-		} # end of while (my $row2 = $dbq2->fetchrow_hashref()) {
+				} # end of if ($queue_enable) 
+			} # end of if(matchip($row2->{'ipaddr'},$row->{'address'},$row->{'mask'})) 
+		} # end of while (my $row2 = $dbq2->fetchrow_hashref()) 
+####### queue ^
+
 
 		if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable )) { print STDERR "\n";}
 		# poniewa¿ wykonuje siê to po ka¿dej zdefiniowanej sieci, nie kasujê wpiso z innych sieciowek w tym i z ustawionym interfejsem all
@@ -405,14 +520,16 @@ my($retval7,@results7)=`ssh -l admin-ssh -i ./mt-test 192.168.44.2 "
 		}
 		if ($dhcp_enable) {
                     foreach my $id (keys (%wireless_dhcp)) {
-                        if (( $wireless_dhcp{$id}{'server'} eq $key) and ($wireless_dhcp{$id}{'LMS'} < 1 )) {
-                                print STDERR "usuwam zbedne $wireless_dhcp{$id}{'mac-address'} @ $wireless_dhcp{$id}{'server'} -> ";
+                        if ($wireless_dhcp{$id}{'LMS'} < 1 ) {
+                                print STDERR "usuwam zbedne $wireless_dhcp{$id}{'mac-address'} -> ";
                                 my %attrs9; $attrs9{'.id'}=$wireless_dhcp{$id}{'.id'};
                                 my($retval9,@results9)=Mtik::mtik_cmd('/ip/dhcp-server/lease/remove',\%attrs9);
                                 sleep ($api_delay);
                                 print STDERR "ret: $retval9 -> ";
                                 if ($retval9 == 1) {
-                                        if (!$quiet) { print STDERR "OK!(del_dhcp) || ";} }
+                                        if (!$quiet) { print STDERR "OK!(del_dhcp) || ";} 
+
+                                        }
                                 else { print "BLAD!(del_dhcp)\n"; }
                         }
                     }
@@ -577,14 +694,17 @@ sub polacz_z_baza() {
 }
 
 sub sprawdz_zmiany() {
+#		print STDERR "t 1 $hostname \n";
 	my $utsfmt = "UNIX_TIMESTAMP()";
 	my $dbq1 = $dbase->prepare("SELECT name, lastreload, reload FROM hosts WHERE name LIKE UPPER('$hostname')");
 	$dbq1->execute();
 	while ( my $row1 = $dbq1->fetchrow_hashref()) {
 		if ( $row1->{'reload'} eq 0 ) {
+#		print STDERR "t 2\n";
 			return 0;
 		}
 		else {
+#		print STDERR "t 3\n";
 			my $sdbq = $dbase->prepare("UPDATE hosts SET reload=0, lastreload=$utsfmt  WHERE name LIKE UPPER('$hostname') and reload=1");
 			$sdbq->execute() || die $sdbq->errstr;
 			return 1;
