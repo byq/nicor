@@ -42,7 +42,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.24';
+my $_version = '2.1.25b';
 
 my %options = (
 	"--debug|d"             =>     \$debug,
@@ -356,14 +356,27 @@ foreach my $key (@networks) {
 				$dbq3->execute();
 
 # tutaj siorbnac z bazy predkosci wynikajace z PP
-				my $wyciagtaryfy2 = $dbase->prepare("SELECT mbps4ref FROM assignments WHERE referrerid=$ownerid AND (datefrom <= $currtime OR datefrom = 0) AND (dateto > $currtime OR dateto = 0) AND mbps4ref > 0 AND suspended = 0");
+#				my $wyciagtaryfy2 = $dbase->prepare("SELECT mbps4ref FROM assignments WHERE referrerid=$ownerid AND (datefrom <= $currtime OR datefrom = 0) AND (dateto > $currtime OR dateto = 0) AND mbps4ref > 0 AND suspended = 0");
+				my $wyciagtaryfy2 = $dbase->prepare("SELECT mbps4ref, mbps4refup FROM assignments WHERE referrerid=$ownerid AND (datefrom <= $currtime OR datefrom = 0) AND (dateto > $currtime OR dateto = 0) AND suspended = 0");
 				$wyciagtaryfy2->execute();
 #
 # tutaj dodac w petli sumowanie predkosci z PP
                    		my $suma4ref = 0;
+            			my $suma4refup = 0;
+            			my $tmpmbps4refup = 0;
+            			my $tmpmbps4ref = 0;
+            			my $row4refup = 0;
+            			my $row4ref = 0;
+
                    		while (my $rowwyciagtaryfy2 = $wyciagtaryfy2->fetchrow_hashref())
                    		{
-                       		    my $tmpmbps4ref = lc($rowwyciagtaryfy2->{'mbps4ref'});
+#                       		    my $tmpmbps4ref = lc($rowwyciagtaryfy2->{'mbps4ref'});
+                    		    $row4refup = $rowwyciagtaryfy2->{'mbps4refup'};
+                    		    $row4ref = $rowwyciagtaryfy2->{'mbps4ref'};
+                    		    $tmpmbps4refup = lc($row4refup);
+                    		    $tmpmbps4ref = lc($row4refup);
+                    		    my $tmp4refup = $tmpmbps4refup * 1024;
+                		    $suma4refup += $tmp4refup;
                        		    my $tmp4ref = $tmpmbps4ref * 1024;
                        		    $suma4ref += $tmp4ref;
                    		}
@@ -373,7 +386,10 @@ foreach my $key (@networks) {
 					$down = $row3->{'downceil'} * $tariff_mult;
 # i dodac je do predkosci kupionej przez klienta
 					$down += $suma4ref;
+
 					$up = $row3->{'upceil'} * $tariff_mult;
+					$up += $suma4refup;
+
 					if (!$row3->{'downceil_n'}) {$down_n = $down; }
 					else {
 					    $down_n = $row3->{'downceil_n'} * $tariff_mult;
@@ -603,6 +619,9 @@ foreach my $key (@networks) {
 # zapetlic trzeba by dodawane byly ipki z dodatkowego pola
 # ew. dodatkowy ip traktowany wspolnie razem z podstawowym
 # tylko jak to sie zachowa przy weryfikacji istniejacych?
+
+# blad: z bloklisty nie sa usuwane wpisy nieistniejacych komputerow (maly problem, ale jednak jest)
+
 				my $dopisany = 0;
 				if ($bloklista_enable) {
                                     my $poprawic_wpis_bloklista=0;
