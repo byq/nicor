@@ -30,7 +30,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.11';
+my $_version = '2.1.12';
 
 my %options = (
 	"--debug|d"              =>     \$debug,
@@ -264,7 +264,7 @@ foreach my $key (@networks) {
 		$dbq2->execute();
 #		my $iface = $row->{'domain'}; # nazwa interfejsu na MT przechowywana jest w polu domain w konfiguracji konkretnej sieci
 		my $iface = $row->{'interface'}; # nazwa interfejsu na MT przechowywana jest w polu interface w konfiguracji konkretnej sieci
-		my $server = $row->{'interface'}; # nazwa interfejsu na MT przechowywana jest w polu interface w konfiguracji konkretnej sieci
+		my $server = $row->{'domain'}; # nazwa interfejsu na MT przechowywana jest w polu interface w konfiguracji konkretnej sieci
 		while (my $row2 = $dbq2->fetchrow_hashref()) {
 			$row2->{'ipaddr'} = u32todotquad($row2->{'ipaddr'});
 			if(matchip($row2->{'ipaddr'},$row->{'address'},$row->{'mask'})) {
@@ -384,6 +384,7 @@ foreach my $key (@networks) {
                                                 if ( $wireless_dhcp{$id}{'address'} ne $ipaddr )	{ $wireless_dhcp{$id}{'address'}=$ipaddr;	$poprawic_wpis_dhcp+= 1;	$attrs8{'address'}=$ipaddr; }
 						if ( $wireless_dhcp{$id}{'mac-address'} ne $cmac )	{ $wireless_dhcp{$id}{'mac-address'}=$cmac;	$poprawic_wpis_dhcp+= 2;	$attrs8{'mac-address'}=$cmac; }
 						if ( $wireless_dhcp{$id}{'comment'} ne $name )		{ $wireless_dhcp{$id}{'comment'}=$name;		$poprawic_wpis_dhcp+= 4;	$attrs8{'comment'}=$name; }
+						if ( $wireless_dhcp{$id}{'server'} ne $server )		{ $wireless_dhcp{$id}{'server'}=$server;	$poprawic_wpis_dhcp+= 8;	$attrs8{'server'}=$server; }
                                                 if ( $poprawic_wpis_dhcp and $wireless_dhcp{$id}{'LMS'} < 2 ) {
                                                         if (!$quiet) { print STDERR "dhcp jest do poprawy ($poprawic_wpis_dhcp) -> "; }
                                                         $attrs8{'.id'} = $id;
