@@ -42,7 +42,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.25b';
+my $_version = '2.1.26b';
 
 my %options = (
 	"--debug|d"             =>     \$debug,
@@ -374,7 +374,7 @@ foreach my $key (@networks) {
                     		    $row4refup = $rowwyciagtaryfy2->{'mbps4refup'};
                     		    $row4ref = $rowwyciagtaryfy2->{'mbps4ref'};
                     		    $tmpmbps4refup = lc($row4refup);
-                    		    $tmpmbps4ref = lc($row4refup);
+                    		    $tmpmbps4ref = lc($row4ref);
                     		    my $tmp4refup = $tmpmbps4refup * 1024;
                 		    $suma4refup += $tmp4refup;
                        		    my $tmp4ref = $tmpmbps4ref * 1024;
@@ -397,6 +397,7 @@ foreach my $key (@networks) {
 					if (!$row3->{'upceil_n'}) {$up_n = $up; }
 					else {
 					    $up_n = $row3->{'upceil_n'} * $tariff_mult;
+					    $up_n += $suma4refup;
 					    }
 				}
 				my $max_limit= $up."000/".$down."000";
