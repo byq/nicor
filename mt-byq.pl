@@ -32,7 +32,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.14';
+my $_version = '2.1.15';
 
 my %options = (
 	"--debug|d"              =>     \$debug,
@@ -254,10 +254,6 @@ if ($Mtik::error_msg eq '' and $arp_enable) {
 	}
 }
 
-# dodac wylapanie ip publ z pola loc, itp
-# arp z obu pol
-# queue z obu pol
-
 if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable )) { print STDERR "\n";}
 my @networks = split ' ', $mknetl;
 foreach my $key (@networks) {
@@ -275,6 +271,8 @@ foreach my $key (@networks) {
 			$row2->{'ipaddr'} = u32todotquad($row2->{'ipaddr'});
 			$row2->{'ipaddr_pub'} = u32todotquad($row2->{'ipaddr_pub'});
 			if(matchip($row2->{'ipaddr'},$row->{'address'},$row->{'mask'})) {
+				my $ipaddr_;
+				my $ipaddr_32;
 				my $ipaddr = $row2->{'ipaddr'};
 				my $ipaddr_pub = $row2->{'ipaddr_pub'};
 				my $cmac = $row2->{'mac'};
@@ -504,22 +502,27 @@ foreach my $key (@networks) {
 				if ($queue_enable) {
 				    my $poprawic_wpis_simple=0;
 				    my $poprawic_wpis_simple_n=0;
+
+				if ($ipaddr_pub ne "0.0.0.0") 
+				{ 
+#				    print STDERR " loc + pub > ";
+				    $ipaddr_ = $ipaddr.", ".$ipaddr_pub;
+				    $ipaddr_32 = $ipaddr."/32,".$ipaddr_pub."/32";
+#				    print STDERR " ip: $ipaddr_ > ";
+				}
+
 				    # teraz musimy sprawdzic kolejke simple
 				    # jesli mamy taki wpis, to porownujemy wartosci
-#				     print STDERR "1:$name_kolejka:2:$wireless_queues{$name_kolejka}{'name'}:";
-#				     print STDERR "3:$wireless_queues{$name_kolejka}{'max-limit'}:4:$max_limit:5:";
 ### queue dzien v
 				    if ( defined ($wireless_queues{$name_kolejka}{'name'}) ) {
 					if (!$quiet) { print STDERR "queue istnieje -> "; }
 					my %attrs5;
-#						if (!$quiet) { print STDERR "queue jest do poprawy ($poprawic_wpis_simple): \n$wireless_queues{$name_kolejka}{'max-limit'} \n$max_limit \n:"; }
-					    if ( $wireless_queues{$name_kolejka}{'max-limit'} ne $max_limit )   { $wireless_queues{$name_kolejka}{'max-limit'}=$max_limit;      $poprawic_wpis_simple+= 1;  $attrs5{'max-limit'} = $max_limit; }
-					    if ( $wireless_queues{$name_kolejka}{'time'} ne $simple_time )      { $wireless_queues{$name_kolejka}{'time'}=$simple_time;         $poprawic_wpis_simple+= 8;  $attrs5{'time'} = $simple_time; }
-					    if ( $wireless_queues{$name_kolejka}{'target'} ne $ipaddr32 )  	{ $wireless_queues{$name_kolejka}{'target'}=$ipaddr32;  	$poprawic_wpis_simple+= 2;  $attrs5{'target'} = $ipaddr32; }
-
+					if ( $wireless_queues{$name_kolejka}{'max-limit'} ne $max_limit )   { $wireless_queues{$name_kolejka}{'max-limit'}=$max_limit;  $poprawic_wpis_simple+= 1;  $attrs5{'max-limit'} = $max_limit; }
+					if ( $wireless_queues{$name_kolejka}{'time'} ne $simple_time )      { $wireless_queues{$name_kolejka}{'time'}=$simple_time;     $poprawic_wpis_simple+= 8;  $attrs5{'time'} = $simple_time; }
+					if ( $wireless_queues{$name_kolejka}{'target'} ne $ipaddr_32 )      { $wireless_queues{$name_kolejka}{'target'}=$ipaddr_32;  	$poprawic_wpis_simple+= 2;  $attrs5{'target'} = $ipaddr_32; }
+#					if ( $wireless_queues{$name_kolejka}{'target'} ne $ipaddr )  	    { $wireless_queues{$name_kolejka}{'target'}=$ipaddr;  	$poprawic_wpis_simple+= 2;  $attrs5{'target'} = $ipaddr; }
 					if ( $poprawic_wpis_simple ) {
 
-#						if (!$quiet) { print STDERR "queue jest do poprawy ($poprawic_wpis_simple): \n$wireless_queues{$name_kolejka}{'max-limit'} \n$max_limit \n:"; }
 						if (!$quiet) { print STDERR "queue jest do poprawy ($poprawic_wpis_simple): "; }
 				    		    $attrs5{'.id'}=$wireless_queues{$name_kolejka}{'.id'};
 						    my($retval5,@results5)=Mtik::mtik_cmd('/queue/simple/set',\%attrs5);
@@ -531,9 +534,14 @@ foreach my $key (@networks) {
 					$wireless_queues{$name_kolejka}{'LMS'} = 1; 
 				    }
 				    else {
-					print STDERR "dodawanie queue -> ";
 					my %attrs1; 
-					$attrs1{'name'} = $name_kolejka; $attrs1{'target'} = $ipaddr; $attrs1{'max-limit'} = $max_limit; $attrs1{'burst-limit'} = $simple_burst_limit; $attrs1{'burst-threshold'} = $simple_burst_threshold; $attrs1{'burst-time'} = $simple_burst_time; $attrs1{'disabled'} = $simple_disable;
+#					if ($ipaddr_pub eq "0.0.0.0") 
+#					{ 
+					    $attrs1{'name'} = $name_kolejka; $attrs1{'target'} = $ipaddr_; $attrs1{'max-limit'} = $max_limit; $attrs1{'burst-limit'} = $simple_burst_limit; $attrs1{'burst-threshold'} = $simple_burst_threshold; $attrs1{'burst-time'} = $simple_burst_time; $attrs1{'disabled'} = $simple_disable; 
+#					}
+#					else {
+#						$attrs1{'name'} = $name_kolejka; $attrs1{'target'} = "$ipaddr, $ipaddr_pub"; $attrs1{'max-limit'} = $max_limit; $attrs1{'burst-limit'} = $simple_burst_limit; $attrs1{'burst-threshold'} = $simple_burst_threshold; $attrs1{'burst-time'} = $simple_burst_time; $attrs1{'disabled'} = $simple_disable; 
+#					    }
 					$attrs1{'dst'} = $simple_dst_address; $attrs1{'limit-at'} = $simple_limit_at; $attrs1{'parent'} = $simple_parent; $attrs1{'priority'} = $simple_priority; $attrs1{'queue'} = $simple_queue; $attrs1{'time'} = $simple_time; $attrs1{'total-queue'} = $simple_total_queue;
 #					$attrs1{'direction'} = $simple_direction; $attrs1{'interface'} = $simple_interface; 
 					my($retval1,@results1)=Mtik::mtik_cmd('/queue/simple/add',\%attrs1);
@@ -548,13 +556,13 @@ foreach my $key (@networks) {
 				    if ( defined ($wireless_queues{$name_kolejka."_\$"}{'name'}) ) {
 					if (!$quiet) { print STDERR "queue_n istnieje -> "; }
 					my %attrs11;
-#my $qwer = $wireless_queues{$name_kolejka."_\$"}{'max-limit'};
-#					if (!$quiet) { print STDERR " \n 1. $qwer \n 2. $max_limit_n \n:"; }
+my $w = $wireless_queues{$name_kolejka."_\$"}{'target'};
 					if ( $wireless_queues{$name_kolejka."_\$"}{'max-limit'} ne $max_limit_n )       { $wireless_queues{$name_kolejka."_\$"}{'max-limit'}=$max_limit_n;      $poprawic_wpis_simple_n+= 1;  $attrs11{'max-limit'} = $max_limit_n; }
-					if ( $wireless_queues{$name_kolejka."_\$"}{'target'} ne $ipaddr32 )  		{ $wireless_queues{$name_kolejka."_\$"}{'target'}=$ipaddr32;  		$poprawic_wpis_simple_n+= 2;  $attrs11{'target'} = $ipaddr32; }
+					if ( $wireless_queues{$name_kolejka."_\$"}{'target'} ne $ipaddr_32 )  		{ $wireless_queues{$name_kolejka."_\$"}{'target'}=$ipaddr_32;  		$poprawic_wpis_simple_n+= 2;  $attrs11{'target'} = $ipaddr_32; }
+#					if ( $w ne $ipaddr )  		{ $wireless_queues{$name_kolejka."_\$"}{'target'}=$ipaddr;  		$poprawic_wpis_simple_n+= 2;  $attrs11{'target'} = $ipaddr; }
 					if ( $wireless_queues{$name_kolejka."_\$"}{'time'} ne $simple_time_n )          { $wireless_queues{$name_kolejka."_\$"}{'time'}=$simple_time_n;         $poprawic_wpis_simple_n+= 8;  $attrs11{'time'} = $simple_time_n; }
 					if ( $poprawic_wpis_simple_n ) {
-						if (!$quiet) { print STDERR "queue_n jest do poprawy ($poprawic_wpis_simple_n): "; }
+						if (!$quiet) { print STDERR "queue_n jest do poprawy ($poprawic_wpis_simple_n ,$w,$ipaddr_32,): "; }
 				    		    $attrs11{'.id'}=$wireless_queues{$name_kolejka."_\$"}{'.id'};
 						    my($retval11,@results11)=Mtik::mtik_cmd('/queue/simple/set',\%attrs11);
 						    sleep ($api_delay);
@@ -564,14 +572,19 @@ foreach my $key (@networks) {
 					}
 					$wireless_queues{$name_kolejka."_\$"}{'LMS'} = 1; 
 				    }
-### queue noc ^
 				    else {
 					print STDERR "dodawanie queue_noc -> ";
 					my %attrs12; 
-					$attrs12{'name'} = $name_kolejka; $attrs12{'target'} = $ipaddr; $attrs12{'max-limit'} = $max_limit; $attrs12{'burst-limit'} = $simple_burst_limit; $attrs12{'burst-threshold'} = $simple_burst_threshold; $attrs12{'burst-time'} = $simple_burst_time; $attrs12{'disabled'} = $simple_disable;
+#					if ($ipaddr_pub eq "0.0.0.0") 
+#					{ 
+					    $attrs12{'name'} = $name_kolejka; $attrs12{'target'} = $ipaddr_; $attrs12{'max-limit'} = $max_limit; $attrs12{'burst-limit'} = $simple_burst_limit; $attrs12{'burst-threshold'} = $simple_burst_threshold; $attrs12{'burst-time'} = $simple_burst_time; $attrs12{'disabled'} = $simple_disable;
+#					}
+#					else {
+#						$attrs12{'name'} = $name_kolejka; $attrs12{'target'} = "$ipaddr, $ipaddr_pub"; $attrs12{'max-limit'} = $max_limit; $attrs12{'burst-limit'} = $simple_burst_limit; $attrs12{'burst-threshold'} = $simple_burst_threshold; $attrs12{'burst-time'} = $simple_burst_time; $attrs12{'disabled'} = $simple_disable;
+#					    }
 					$attrs12{'dst'} = $simple_dst_address; $attrs12{'limit-at'} = $simple_limit_at; $attrs12{'parent'} = $simple_parent; $attrs12{'priority'} = $simple_priority; $attrs12{'queue'} = $simple_queue; $attrs12{'time'} = $simple_time; $attrs12{'total-queue'} = $simple_total_queue;
 					$attrs12{'name'} = $name_kolejka."_\$"; $attrs12{'max-limit'} = $max_limit_n; $attrs12{'time'} = $simple_time_n;
-#					$attrs1{'direction'} = $simple_direction; $attrs1{'interface'} = $simple_interface; 
+#					$attrs12{'direction'} = $simple_direction; $attrs12{'interface'} = $simple_interface; 
 					my($retval12,@results1)=Mtik::mtik_cmd('/queue/simple/add',\%attrs12);
 					sleep ($api_delay);
 					print STDERR "ret: $retval12 -> ";
@@ -579,6 +592,7 @@ foreach my $key (@networks) {
 						print "BLAD przy dodawaniu queue!\n"; }
 					else { if (!$quiet) { print STDERR "OK(add_queue)\n"; } }
 				    }
+### queue noc ^
 				{ if (!$quiet) { print STDERR "OK \n"; } }
 				} # end of if ($queue_enable) 
 			} # end of if(matchip($row2->{'ipaddr'},$row->{'address'},$row->{'mask'})) 
