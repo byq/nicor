@@ -30,7 +30,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.12';
+my $_version = '2.1.13';
 
 my %options = (
 	"--debug|d"              =>     \$debug,
@@ -86,7 +86,7 @@ if(!$quiet) {
 	print STDOUT "mikrotik, version $_version\n";
 	print STDOUT "(C) Copyright 2001-2006 LMS Developers\n";
 	print STDOUT "(C) Copyright 2009-20xx Emers\n";
-	print STDOUT "(C) 2013 byq\n";
+	print STDOUT "(C) Copyright 2013-20xx byq\n";
 	print STDOUT "Using file $configfile as config.\n";
 	print STDOUT "Using file $mklistfile as mikrotik's list.\n";
 }
@@ -116,6 +116,9 @@ my $mkuser;
 my $mkpass;
 my $mknetl;
 my $dbase;
+my $ipjestwsieci;
+my $mask;
+my $address;
 
 my $def_down=100;	# minimalny download dla osób bez taryfy, potrzebny by daæ dostêp dp stron serwisowych
 my $def_up=100;		# minimalny upload dla osób bez taryfy, potrzebny by daæ dostêp dp stron serwisowych
@@ -128,7 +131,7 @@ my $queue_enable=1; 	# czy zarzadzac kolejkami
 my $dhcp_enable=1;	# czy zarzadzac dhcp
 my $arp_enable=1;	# czy zarzadzac arp
 
-#domy¶lne ustawienia regu³ki interface wireless access-list
+#domyslne ustawienia regulki interface wireless access-list
 my $macs_private_algo='none';
 my $macs_disabled='false';
 my $macs_forwarding='true';
@@ -218,7 +221,7 @@ my(%wireless_dhcp) = Mtik::get_by_key('/ip/dhcp-server/lease/print','.id');
 #		print STDERR " error: $Mtik::error_msg\n";
 
 if ($Mtik::error_msg eq '' and $dhcp_enable) {
-#		    print STDERR " dhcp enable\n"; 
+		    print STDERR " dhcp enable\n"; 
 	foreach my $id (keys (%wireless_dhcp)) {
 		if(!$quiet) { 
 		    print STDERR " ID: $id\n"; 
@@ -227,6 +230,7 @@ if ($Mtik::error_msg eq '' and $dhcp_enable) {
 		$_=$wireless_dhcp{$id}{'comment'};
 		if (/$macs_usunac/) { $wireless_dhcp{$id}{'LMS'} = '2'; }
 		else { $wireless_dhcp{$id}{'LMS'} = '0'; }
+#		print STDERR $wireless_dhcp{$id}{'LMS'};
 	}
 }
 
@@ -249,7 +253,6 @@ if ($Mtik::error_msg eq '' and $arp_enable) {
 }
 
 # dodac wylapanie ip publ z pola loc, itp
-# dhcp tylko z pola gornego
 # arp z obu pol
 # queue z obu pol
 
@@ -258,20 +261,24 @@ my @networks = split ' ', $mknetl;
 foreach my $key (@networks) {
 	my $dbq = $dbase->prepare("SELECT id, inet_ntoa(address) AS address, mask, interface, domain  FROM networks WHERE name = UPPER('$key')");
 	$dbq->execute();
-	if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable ) ) { print STDERR "Sprawdzam siec: $key\n";}
+	if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable ) ) { print STDERR "\nSprawdzam siec: $key\n";}
 	while (my $row = $dbq->fetchrow_hashref()) {
-		my $dbq2 = $dbase->prepare("SELECT id, name, ipaddr, mac, ownerid FROM vnodes WHERE name not like '%$macs_usunac%' ORDER BY ipaddr ASC");
+		my $dbq2 = $dbase->prepare("SELECT id, name, ipaddr, ipaddr_pub, mac, ownerid FROM vnodes WHERE name not like '%$macs_usunac%' ORDER BY ipaddr ASC");
 		$dbq2->execute();
-#		my $iface = $row->{'domain'}; # nazwa interfejsu na MT przechowywana jest w polu domain w konfiguracji konkretnej sieci
 		my $iface = $row->{'interface'}; # nazwa interfejsu na MT przechowywana jest w polu interface w konfiguracji konkretnej sieci
-		my $server = $row->{'domain'}; # nazwa interfejsu na MT przechowywana jest w polu interface w konfiguracji konkretnej sieci
+		my $server = $row->{'domain'}; # nazwa servera dhcp na MT przechowywana jest w polu domain w konfiguracji konkretnej sieci
+		$mask = $row->{'mask'};
+		$address = $row->{'address'};
 		while (my $row2 = $dbq2->fetchrow_hashref()) {
 			$row2->{'ipaddr'} = u32todotquad($row2->{'ipaddr'});
+			$row2->{'ipaddr_pub'} = u32todotquad($row2->{'ipaddr_pub'});
 			if(matchip($row2->{'ipaddr'},$row->{'address'},$row->{'mask'})) {
 				my $ipaddr = $row2->{'ipaddr'};
+				my $ipaddr_pub = $row2->{'ipaddr_pub'};
 				my $cmac = $row2->{'mac'};
 				my $ownerid = $row2->{'ownerid'};
 				my $ipaddr32=$ipaddr."/32";
+				my $ipaddr_pub32=$ipaddr_pub."/32";
 				my $name_kolejka = $row2->{'name'};
 				# budujemy opis, jesli zaczyna sie od prefixu LMS, to jest dodane przez skrypt
 				my $name = $aclprefix.':uid'.$ownerid.':nid'.$row2->{'id'}.':'.$row2->{'name'};
@@ -334,9 +341,9 @@ foreach my $key (@networks) {
 						}
 						else { if (!$quiet) { print STDERR "OK || "; } }
 						$wireless_macs{$id}{'LMS'} = 1;
-					} # end of if ( ($wireless_macs{$id}{'mac-address'} eq $cmac ) and ( $wireless_macs{$id}{'interface'} eq $iface) ) {
-				    } # end of foreach my $id (keys (%wireless_macs)) {
-				} #end of if ($acl_enable) {
+					} # end of if ( ($wireless_macs{$id}{'mac-address'} eq $cmac ) and ( $wireless_macs{$id}{'interface'} eq $iface) ) 
+				    } # end of foreach my $id (keys (%wireless_macs)) 
+				} #end of if ($acl_enable) 
 
 				if (!$zarejestrowany and $acl_enable) {
 					print STDERR "brak acl -> ";
@@ -370,17 +377,17 @@ foreach my $key (@networks) {
 				if ($dhcp_enable) {
                                     my $poprawic_wpis_dhcp=0;
                                     # teraz musimy sprawdzic lease z dhcp-server
-                                    # jesli mamy taki wpis, to porównujemy wartosci
+                                    # jesli mamy taki wpis, to porownujemy wartosci
 				    # sprawdza istnienie mac lub ipaddr
 				    # problem: zmiana mac adresu pomiedzy istniejace IP - obejscie poprzez disable, 
 				    # a nastepnie enable, gdy bedzie kopia to error i remove
 				    foreach my $id (keys (%wireless_dhcp)) {
                                         if ( ($wireless_dhcp{$id}{'mac-address'} eq $cmac ) || ($wireless_dhcp{$id}{'address'} eq $ipaddr) ) {
-                                                if (!$quiet) { print STDERR "dhcp istnieje -> "; }
+                                                if (!$quiet) { print STDERR "dhcp $wireless_dhcp{$id}{'mac-address'} $wireless_dhcp{$id}{'address'} istnieje -> "; }
                                                 $dopisany=1;
                                                 my $poprawic_wpis_dhcp=0;
                                                 my %attrs8;
-                                                # je¶li ju¿ dodany, to trzeba sprawdziæ wszystkie atrybuty i ewentualnie poprawiæ
+                                                # jesli juz dodany, to trzeba sprawdzic wszystkie atrybuty i ewentualnie poprawic
                                                 if ( $wireless_dhcp{$id}{'address'} ne $ipaddr )	{ $wireless_dhcp{$id}{'address'}=$ipaddr;	$poprawic_wpis_dhcp+= 1;	$attrs8{'address'}=$ipaddr; }
 						if ( $wireless_dhcp{$id}{'mac-address'} ne $cmac )	{ $wireless_dhcp{$id}{'mac-address'}=$cmac;	$poprawic_wpis_dhcp+= 2;	$attrs8{'mac-address'}=$cmac; }
 						if ( $wireless_dhcp{$id}{'comment'} ne $name )		{ $wireless_dhcp{$id}{'comment'}=$name;		$poprawic_wpis_dhcp+= 4;	$attrs8{'comment'}=$name; }
@@ -406,7 +413,6 @@ foreach my $key (@networks) {
                                                 } # koniec poprawiania wpisow
                                                 else { if (!$quiet) { print STDERR "OK || "; } }
                                                 $wireless_dhcp{$id}{'LMS'} = 1;
-
                                         } # end of if ( ($wireless_macs{$id}{'mac-address'} eq $cmac ) and ( $wireless_macs{$id}{'interface'} eq $iface) ) 
                                     } # end of foreach my $id (keys (%wireless_macs)) 
 				    }
@@ -422,7 +428,7 @@ foreach my $key (@networks) {
                                         print STDERR "ret: $retval7 -> ";
                                         if ($retval7 != 1) {
                                                 print "BLAD przy dodawaniu wpisu dhcp!! || "; 
-#						print " error: $Mtik::error_msg\n";
+						print " error: $Mtik::error_msg\n";
                                                 }
                                         else { if (!$quiet) { print STDERR "OK(add_dhcp) || "; } }
                                 	}
@@ -439,11 +445,11 @@ foreach my $key (@networks) {
                                                 $dopisany=1;
                                                 my $poprawic_wpis_arp=0;
                                                 my %attrs8;
-                                                # je¶li ju¿ dodany, to trzeba sprawdziæ wszystkie atrybuty i ewentualnie poprawiæ
-                                                if ( $wireless_arp{$id}{'address'} ne $ipaddr )		{ $wireless_arp{$id}{'address'}=$ipaddr;	$poprawic_wpis_arp+= 1;	$attrs8{'address'}=$ipaddr; }
-						if ( $wireless_arp{$id}{'mac-address'} ne $cmac )	{ $wireless_arp{$id}{'mac-address'}=$cmac;	$poprawic_wpis_arp+= 2;	$attrs8{'mac-address'}=$cmac; }
-						if ( $wireless_arp{$id}{'comment'} ne $name )		{ $wireless_arp{$id}{'comment'}=$name;		$poprawic_wpis_arp+= 4;	$attrs8{'comment'}=$name; }
-						if ( $wireless_arp{$id}{'interface'} ne $iface )	{ $wireless_arp{$id}{'interface'}=$iface;	$poprawic_wpis_arp+= 8;	$attrs8{'interface'}=$iface; }
+                                                # jesli juz dodany, to trzeba sprawdzic wszystkie atrybuty i ewentualnie poprawic
+                                                if ( $wireless_arp{$id}{'address'} ne $ipaddr )		{ $wireless_arp{$id}{'address'}=$ipaddr;		$poprawic_wpis_arp+= 1;	 $attrs8{'address'}=$ipaddr; }
+						if ( $wireless_arp{$id}{'mac-address'} ne $cmac )	{ $wireless_arp{$id}{'mac-address'}=$cmac;		$poprawic_wpis_arp+= 2;	 $attrs8{'mac-address'}=$cmac; }
+						if ( $wireless_arp{$id}{'comment'} ne $name )		{ $wireless_arp{$id}{'comment'}=$name;			$poprawic_wpis_arp+= 4;	 $attrs8{'comment'}=$name; }
+						if ( $wireless_arp{$id}{'interface'} ne $iface )	{ $wireless_arp{$id}{'interface'}=$iface;		$poprawic_wpis_arp+= 8;	 $attrs8{'interface'}=$iface; }
                                                 if ( $poprawic_wpis_arp and $wireless_arp{$id}{'LMS'} < 2 ) {
                                                         if (!$quiet) { print STDERR "arp jest do poprawy ($poprawic_wpis_arp) -> "; }
                                                         $attrs8{'.id'} = $id;
@@ -471,15 +477,15 @@ foreach my $key (@networks) {
 				    }
 				    if (!$dopisany and $arp_enable) {
                                         print STDERR "brak arp, dodaje -> ";
-					my %attrs7; 
-					$attrs7{'address'} = $ipaddr; 
-					$attrs7{'mac-address'} = $cmac; 
-					$attrs7{'comment'} = $name;
-					$attrs7{'interface'} = $iface; 
-					my($retval7,@results7)=Mtik::mtik_cmd('/ip/arp/add',\%attrs7);
+					my %attrs3; 
+					$attrs3{'address'} = $ipaddr; 
+					$attrs3{'mac-address'} = $cmac; 
+					$attrs3{'comment'} = $name;
+					$attrs3{'interface'} = $iface; 
+					my($retval3,@results3)=Mtik::mtik_cmd('/ip/arp/add',\%attrs3);
                                         sleep ($api_delay);
-                                        print STDERR "ret: $retval7 -> ";
-                                        if ($retval7 != 1) {
+                                        print STDERR "ret: $retval3 -> ";
+                                        if ($retval3 != 1) {
                                                 print "BLAD przy dodawaniu wpisu arp!! || "; 
 #						print " error: $Mtik::error_msg\n";
                                                 }
@@ -583,16 +589,22 @@ foreach my $key (@networks) {
 			}
 		    }
 		}
+
 		if ($dhcp_enable) {
                     foreach my $id (keys (%wireless_dhcp)) {
-                        if ($wireless_dhcp{$id}{'LMS'} < 1 ) {
-                                print STDERR "usuwam zbedne $wireless_dhcp{$id}{'mac-address'} -> ";
+# blad - gdy siec nei ma komputerow, to nie sa
+# sprawdzenie, czy analizowany IP nalezy do sprawdzanej sieci, jezeli nie to nie usuwa go
+		    $ipjestwsieci = matchip($wireless_dhcp{$id}{'address'},$address,$mask);
+print STDERR "\n . $ipjestwsieci . net: $address maska: $mask . ip: $wireless_dhcp{$id}{'address'} \n";
+                        if ($wireless_dhcp{$id}{'LMS'} < 1 and $ipjestwsieci) {
+                                print STDERR "uwaga dhcp: $wireless_dhcp{$id}{'LMS'} | ";
+                                print STDERR "usuwam zbedne dhcp: $wireless_dhcp{$id}{'mac-address'} -> ";
                                 my %attrs9; $attrs9{'.id'}=$wireless_dhcp{$id}{'.id'};
                                 my($retval9,@results9)=Mtik::mtik_cmd('/ip/dhcp-server/lease/remove',\%attrs9);
                                 sleep ($api_delay);
                                 print STDERR "ret: $retval9 -> ";
                                 if ($retval9 == 1) {
-                                        if (!$quiet) { print STDERR "OK!(del_dhcp) || ";} 
+                                        if (!$quiet) { print STDERR "OK!(del_dhcp)\n";} 
 
                                         }
                                 else { print "BLAD!(del_dhcp)\n"; }
@@ -619,7 +631,6 @@ if ($queue_enable) {
 	}
     }
 }
-
 
 
 
@@ -697,19 +708,19 @@ sub taryfy($$) {
 		my $dbq2 = $dbase->prepare("SELECT id, downceil  FROM tariffs WHERE id = $row1->{'tariffid'} AND downceil <> 0");
 		$dbq2->execute();
 		while ( my $row2 = $dbq2->fetchrow_hashref()) {
-			# szukamy najwiêkszej taryfy
+			# szukamy najwiekszej taryfy
 			if ( $row2->{'downceil'} > $max_down ) {
 				$max_down = $row2->{'downceil'};
 				$max_id = $row2->{'id'};
 			}
 		}
 	}
-	# je¶li zosta³a jaka¶ taryfa z id > 0 to zwróc i zakoñcz
+	# jesli zostala jakas taryfa z id > 0 to zwroc i zakoncz
 	if($max_id > 0 ) {
 		return $max_id;
 	}
 
-	# nie znaleziono aktywnej taryfy wiec szukam jeszcze nie rozpoczêtych
+	# nie znaleziono aktywnej taryfy wiec szukam jeszcze nie rozpoczetych
 	$dbq1 = $dbase->prepare("SELECT tariffid FROM assignments WHERE customerid = $user_id AND suspended = 0");
 	$dbq1->execute();
 	while (my $row1 = $dbq1->fetchrow_hashref()) {
