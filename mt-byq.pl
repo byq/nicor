@@ -42,7 +42,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.21';
+my $_version = '2.1.22';
 
 my %options = (
 	"--debug|d"             =>     \$debug,
@@ -1011,7 +1011,7 @@ sub sprawdz_zmiany() {
        my $dbq1 = $dbase->prepare("SELECT name, lastreload, reload FROM hosts WHERE name LIKE UPPER('$hostname')");
        $dbq1->execute();
        while ( my $row1 = $dbq1->fetchrow_hashref()) {
-               if ( $row1->{'reload'} eq 0 ) {
+               if ( $row1->{'reload'} ne 1 ) {
                    if($debug) {print STDERR "nie trzeba przeladowywac\n"; }
                        return 0;
                }
