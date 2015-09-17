@@ -42,7 +42,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.23';
+my $_version = '2.1.24';
 
 my %options = (
 	"--debug|d"             =>     \$debug,
@@ -351,10 +351,28 @@ foreach my $key (@networks) {
 				my $up=$def_up;
 				my $down_n=$def_down;
 				my $up_n=$def_up;
+				my $currtime = strftime("%s",localtime2());
 				my $dbq3 = $dbase->prepare("SELECT upceil, downceil, upceil_n, downceil_n FROM tariffs WHERE id=$taryfa");
 				$dbq3->execute();
+
+# tutaj siorbnac z bazy predkosci wynikajace z PP
+				my $wyciagtaryfy2 = $dbase->prepare("SELECT mbps4ref FROM assignments WHERE referrerid=$ownerid AND (datefrom <= $currtime OR datefrom = 0) AND (dateto > $currtime OR dateto = 0) AND mbps4ref > 0 AND suspended = 0");
+				$wyciagtaryfy2->execute();
+#
+# tutaj dodac w petli sumowanie predkosci z PP
+                   		my $suma4ref = 0;
+                   		while (my $rowwyciagtaryfy2 = $wyciagtaryfy2->fetchrow_hashref())
+                   		{
+                       		    my $tmpmbps4ref = lc($rowwyciagtaryfy2->{'mbps4ref'});
+                       		    my $tmp4ref = $tmpmbps4ref * 1024;
+                       		    $suma4ref += $tmp4ref;
+                   		}
 				while (my $row3 = $dbq3->fetchrow_hashref()) {
+
+
 					$down = $row3->{'downceil'} * $tariff_mult;
+# i dodac je do predkosci kupionej przez klienta
+					$down += $suma4ref;
 					$up = $row3->{'upceil'} * $tariff_mult;
 					if (!$row3->{'downceil_n'}) {$down_n = $down; }
 					else {
