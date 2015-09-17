@@ -5,9 +5,9 @@
 # czyli 1024k, zamiast 1000k
 # MT zamienia przepustowosci z k na M i funkcja porownujaca nie dziala poprawnie
 #
-# testowane z RB750GL ver 6.4 i LMS 1.10.4
+# testowane z RB750GL ver 6.4 i 6.20 oraz LMS 1.10.4
 #
-# dodac tablice arp
+# dodac obsluge ip publ wpisanych w pole localnego
 #
 
 use strict;
@@ -17,9 +17,9 @@ use Config::IniFiles;
 use Getopt::Long;
 use Time::Local;
 use POSIX qw(strftime mktime);
-use vars qw($configfile $quiet $help $version $force $fakedate $mklistfile $error_msg);
+use vars qw($configfile $quiet $help $version $force $fakedate $mklistfile $error_msg $debug);
 
-$ENV{'PATH'}='/sbin:/usr/sbin:/usr/local/sbin:/bin:/usr/bin:/usr/local/bin:/etc/rc.d/:/etc/lms';
+$ENV{'PATH'}='/sbin:/usr/sbin:/usr/local/sbin:/bin:/usr/bin:/usr/local/bin:/etc/rc.d/:/etc/lms-nett';
 
 sub mask2prefix($);
 sub matchip($$$);
@@ -30,9 +30,10 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.10';
+my $_version = '2.1.11';
 
 my %options = (
+	"--debug|d"              =>     \$debug,
 	"--config-file|C=s"	=>	\$configfile,
 	"--mklist|l=s"		=>	\$mklistfile,
 	"--quiet|q"		=>	\$quiet,
@@ -51,8 +52,8 @@ mikrotik, version $_version
 (C) 2009-20xx Emers, Wojtek
 (C) 2014 byq
 
--C, --config-file=/etc/lms/lms.ini	alternate config file (default: /etc/lms/lms.ini);
--l, --mklist=/etc/lms/mikrotik.list	mikrotik's list file (default: /etc/lms/mikrotik.list);
+-C, --config-file=/etc/lms-nett/lms.ini	alternate config file (default: /etc/lms-nett/lms.ini);
+-l, --mklist=/etc/lms-nett/mikrotik.list	mikrotik's list file (default: /etc/lms-nett/mikrotik.list);
 -h, --help			print this help and exit;
 -v, --version			print version info and exit;
 -q, --quiet			suppress any output, except errors;
@@ -67,20 +68,18 @@ if($version) {
 mikrotik, version $_version
 (C) 2001-2006 LMS Developers
 (C) 2009-20xx Emers, Wojtek
-(C) 2013 byq
+(C) 2013-20xx byq
 
 EOF
 	exit 0;
 }
 
 if(!$configfile) {
-	$configfile = "/etc/lms-remote-ptlanet/lms.ini";
-#	$configfile = "/etc/lms/lms.ini";
+	$configfile = "/etc/lms-nett/lms.ini";
 }
 
 if(!$mklistfile) {
-	$mklistfile = "/etc/lms-remote-ptlanet/mikrotik.list";
-#	$mklistfile = "/etc/lms/mikrotik.list";
+	$mklistfile = "/etc/lms-nett/mikrotik.list";
 }
 
 if(!$quiet) {
@@ -124,9 +123,9 @@ my $aclprefix='LMS';	# przefix dodawany do wpisów generowanych automatycznie, pr
 my $tariff_mult=1;	# mno¿nik uploadu i downloadu, dobrze ustawiæ >1, by MT nie traci³ mocy CPU na zarz±dzanie pasmem, gdy u¿ytkownik osi±ga warto¶æ graniczn± taryfy
 my $macs_usunac='MT-';	# ignoruj urz±dzenia z tym prefixem w polu name, najczê¶ciej to sprzêt sieciowy, którego nie trzeba ograniczaæ
 my $api_delay=0;	# czas (w sekundach) oczekiwania po zmianie/dokonaniu wpisu
-my $acl_enable=1; 	# czy zarzadzac accesslista
-my $queue_enable=0; 	# czy zarzadzac kolejkami
-my $dhcp_enable=0;	# czy zarzadzac dhcp
+my $acl_enable=0; 	# czy zarzadzac accesslista
+my $queue_enable=1; 	# czy zarzadzac kolejkami
+my $dhcp_enable=1;	# czy zarzadzac dhcp
 my $arp_enable=1;	# czy zarzadzac arp
 
 #domy¶lne ustawienia regu³ki interface wireless access-list
@@ -249,6 +248,10 @@ if ($Mtik::error_msg eq '' and $arp_enable) {
 	}
 }
 
+# dodac wylapanie ip publ z pola loc, itp
+# dhcp tylko z pola gornego
+# arp z obu pol
+# queue z obu pol
 
 if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable )) { print STDERR "\n";}
 my @networks = split ' ', $mknetl;
@@ -257,9 +260,11 @@ foreach my $key (@networks) {
 	$dbq->execute();
 	if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable ) ) { print STDERR "Sprawdzam siec: $key\n";}
 	while (my $row = $dbq->fetchrow_hashref()) {
-		my $dbq2 = $dbase->prepare("SELECT id, name, ipaddr, mac, ownerid FROM nodes WHERE name not like '%$macs_usunac%' ORDER BY ipaddr ASC");
+		my $dbq2 = $dbase->prepare("SELECT id, name, ipaddr, mac, ownerid FROM vnodes WHERE name not like '%$macs_usunac%' ORDER BY ipaddr ASC");
 		$dbq2->execute();
-		my $iface = $row->{'domain'}; # nazwa interfejsu na MT przechowywana jest w polu domain w konfiguracji konkretnej sieci
+#		my $iface = $row->{'domain'}; # nazwa interfejsu na MT przechowywana jest w polu domain w konfiguracji konkretnej sieci
+		my $iface = $row->{'interface'}; # nazwa interfejsu na MT przechowywana jest w polu interface w konfiguracji konkretnej sieci
+		my $server = $row->{'interface'}; # nazwa interfejsu na MT przechowywana jest w polu interface w konfiguracji konkretnej sieci
 		while (my $row2 = $dbq2->fetchrow_hashref()) {
 			$row2->{'ipaddr'} = u32todotquad($row2->{'ipaddr'});
 			if(matchip($row2->{'ipaddr'},$row->{'address'},$row->{'mask'})) {
@@ -268,10 +273,10 @@ foreach my $key (@networks) {
 				my $ownerid = $row2->{'ownerid'};
 				my $ipaddr32=$ipaddr."/32";
 				my $name_kolejka = $row2->{'name'};
-				# budujemy opis, je¶li zaczyna siê od prefixu LMS, to jest dodane przez skrypt
+				# budujemy opis, jesli zaczyna sie od prefixu LMS, to jest dodane przez skrypt
 				my $name = $aclprefix.':uid'.$ownerid.':nid'.$row2->{'id'}.':'.$row2->{'name'};
 				my $taryfa = taryfy($ownerid,$ipaddr);
-				# ustawiamy domy¶ln± predko¶æ, nawet jak kto¶ nie ma taryfy, aby wy¶wietla³y siê strony serwisowe
+				# ustawiamy domyslna predkosc, nawet jak ktos nie ma taryfy, aby wyswietlaly sie strony serwisowe
 				my $down=$def_down;
 				my $up=$def_up;
 				my $down_n=$def_down;
@@ -294,7 +299,7 @@ foreach my $key (@networks) {
 				my $max_limit= $up."k/".$down."k";
 				my $max_limit_n= $up_n."k/".$down_n."k";
 				if (!$quiet and $acl_enable) { print STDERR "$cmac @ $iface <-> "; }
-				# szukamy czy mamy ju¿ zarejestrowany komputer na MT
+				# szukamy czy mamy juz zarejestrowany komputer na MT
 				my $zarejestrowany = 0 ;
 
 ####### acl v
@@ -409,7 +414,7 @@ foreach my $key (@networks) {
 					my %attrs7; 
 					$attrs7{'address'} = $ipaddr; 
 					$attrs7{'mac-address'} = $cmac; 
-#					$attrs7{'server'} = $key; 
+					$attrs7{'server'} = $server; 
 					$attrs7{'comment'} = $name;
 					my($retval7,@results7)=Mtik::mtik_cmd('/ip/dhcp-server/lease/add',\%attrs7);
                                         sleep ($api_delay);
@@ -422,13 +427,72 @@ foreach my $key (@networks) {
                                 	}
 ####### dhcp ^
 
+####### arp v
+
+				my $dopisany = 0;
+				if ($arp_enable) {
+                                    my $poprawic_wpis_arp=0;
+				    foreach my $id (keys (%wireless_arp)) {
+                                        if ( ($wireless_arp{$id}{'mac-address'} eq $cmac ) || ($wireless_arp{$id}{'address'} eq $ipaddr) ) {
+                                                if (!$quiet) { print STDERR "arp istnieje -> "; }
+                                                $dopisany=1;
+                                                my $poprawic_wpis_arp=0;
+                                                my %attrs8;
+                                                # je¶li ju¿ dodany, to trzeba sprawdziæ wszystkie atrybuty i ewentualnie poprawiæ
+                                                if ( $wireless_arp{$id}{'address'} ne $ipaddr )		{ $wireless_arp{$id}{'address'}=$ipaddr;	$poprawic_wpis_arp+= 1;	$attrs8{'address'}=$ipaddr; }
+						if ( $wireless_arp{$id}{'mac-address'} ne $cmac )	{ $wireless_arp{$id}{'mac-address'}=$cmac;	$poprawic_wpis_arp+= 2;	$attrs8{'mac-address'}=$cmac; }
+						if ( $wireless_arp{$id}{'comment'} ne $name )		{ $wireless_arp{$id}{'comment'}=$name;		$poprawic_wpis_arp+= 4;	$attrs8{'comment'}=$name; }
+						if ( $wireless_arp{$id}{'interface'} ne $iface )	{ $wireless_arp{$id}{'interface'}=$iface;	$poprawic_wpis_arp+= 8;	$attrs8{'interface'}=$iface; }
+                                                if ( $poprawic_wpis_arp and $wireless_arp{$id}{'LMS'} < 2 ) {
+                                                        if (!$quiet) { print STDERR "arp jest do poprawy ($poprawic_wpis_arp) -> "; }
+                                                        $attrs8{'.id'} = $id;
+                                                        # przed zapisaniem zmian wpis ma byc disabled, a na koniec enabled by ominac error
+                                                        $attrs8{'disabled'} = 'yes';
+                                                        my($retval8,@results8)=Mtik::mtik_cmd('/ip/arp/set',\%attrs8);
+                                                        sleep ($api_delay);
+                                                        print STDERR "ret: $retval8 -> ";
+                                                        if ($retval8 != 1) {
+                                                                print STDERR "BLAD przy zmianie wpisu arp! pewno jest juz taki mac lub ip|| "; }
+                                                        else { if (!$quiet) { print STDERR "OK(set_arp) || "; } }
+							# enable dla edytowanego wpisu
+                                                        $attrs8{'disabled'} = 'no';
+							my($retval8,@results8)=Mtik::mtik_cmd('/ip/arp/set',\%attrs8);
+							# kasujemy disabled zakonczony errorem
+							my %attrs10;
+							$attrs10{'.id'} = $id;
+							if ($Mtik::error_msg) { Mtik::mtik_cmd('/ip/arp/remove',\%attrs10 ) ;}
+                                                } # koniec poprawiania wpisow
+                                                else { if (!$quiet) { print STDERR "OK || "; } }
+                                                $wireless_arp{$id}{'LMS'} = 1;
+
+                                        } # end of if ( ($wireless_macs{$id}{'mac-address'} eq $cmac ) and ( $wireless_macs{$id}{'interface'} eq $iface) ) 
+                                    } # end of foreach my $id (keys (%wireless_macs)) 
+				    }
+				    if (!$dopisany and $arp_enable) {
+                                        print STDERR "brak arp, dodaje -> ";
+					my %attrs7; 
+					$attrs7{'address'} = $ipaddr; 
+					$attrs7{'mac-address'} = $cmac; 
+					$attrs7{'comment'} = $name;
+					$attrs7{'interface'} = $iface; 
+					my($retval7,@results7)=Mtik::mtik_cmd('/ip/arp/add',\%attrs7);
+                                        sleep ($api_delay);
+                                        print STDERR "ret: $retval7 -> ";
+                                        if ($retval7 != 1) {
+                                                print "BLAD przy dodawaniu wpisu arp!! || "; 
+#						print " error: $Mtik::error_msg\n";
+                                                }
+                                        else { if (!$quiet) { print STDERR "OK(add_arp) || "; } }
+                                	}
+####### arp ^
+
 ####### queue v
 				if ($queue_enable) {
 				    my $poprawic_wpis_simple=0;
 				    # teraz musimy sprawdziæ kolejkê simple
 				    # jesli mamy taki wpis, to porównujemy warto¶ci
-#				     print STDERR "1:$name_kolejka:2:$wireless_queues{$name_kolejka}{'name'}:";
-#				     print STDERR "3:$wireless_queues{$name_kolejka}{'max-limit'}:4:$max_limit:5:";
+				     print STDERR "1:$name_kolejka:2:$wireless_queues{$name_kolejka}{'name'}:";
+				     print STDERR "3:$wireless_queues{$name_kolejka}{'max-limit'}:4:$max_limit:5:";
 ### queue dzien v
 				    if ( defined ($wireless_queues{$name_kolejka}{'name'}) ) {
 					if (!$quiet) { print STDERR "queue istnieje -> "; }
@@ -538,7 +602,7 @@ foreach my $key (@networks) {
 	} # end of while (my $row = $dbq->fetchrow_hashref()) {
 } # end of foreach my $key (@networks) {
 
-# usuwamy kolejki które nie maj± powiazania
+# usuwamy kolejki ktore nie maja powiazania
 if ($queue_enable) {
     foreach my $name_queues (keys (%wireless_queues)) {
 	# wykonujemy tylko raz na koniec
@@ -558,10 +622,13 @@ if ($queue_enable) {
 
 
 
-
 				Mtik::logout;
 			} # end of if (Mtik::login($mkhost,$mkuser,$mkpass)) {
 				else { print STDERR "Blad polaczenia!\n"; }
+# zapisanie do bazy koniec przeladowania
+			my $utsfmt = "UNIX_TIMESTAMP()";
+            		my $sdbq = $dbase->prepare("UPDATE hosts SET reload=0, lastreload=$utsfmt  WHERE name LIKE UPPER('$hostname') and reload=2");
+            		$sdbq->execute() || die $sdbq->errstr;
 		} # end of if(sprawdz_zmiany() or $force) {
 	} # end of foreach my $row(@list) {
 	$dbase->disconnect();
@@ -621,7 +688,7 @@ sub taryfy($$) {
 	my $max_down = 0;
 	my $max_id = 0;
 	my $currtime = strftime("%s",localtime2());
-	# najpierw pobieramy w naturalny sposób aktywn± taryfê
+	# najpierw pobieramy w naturalny sposob aktywna taryfe
 	my $dbq1 = $dbase->prepare("SELECT tariffid FROM assignments WHERE customerid = $user_id AND (datefrom <= $currtime OR datefrom = 0) AND (dateto > $currtime OR dateto = 0) AND suspended = 0");
 	$dbq1->execute();
 	while (my $row1 = $dbq1->fetchrow_hashref()) {
@@ -694,20 +761,20 @@ sub polacz_z_baza() {
 }
 
 sub sprawdz_zmiany() {
-#		print STDERR "t 1 $hostname \n";
-	my $utsfmt = "UNIX_TIMESTAMP()";
-	my $dbq1 = $dbase->prepare("SELECT name, lastreload, reload FROM hosts WHERE name LIKE UPPER('$hostname')");
-	$dbq1->execute();
-	while ( my $row1 = $dbq1->fetchrow_hashref()) {
-		if ( $row1->{'reload'} eq 0 ) {
-#		print STDERR "t 2\n";
-			return 0;
-		}
-		else {
-#		print STDERR "t 3\n";
-			my $sdbq = $dbase->prepare("UPDATE hosts SET reload=0, lastreload=$utsfmt  WHERE name LIKE UPPER('$hostname') and reload=1");
-			$sdbq->execute() || die $sdbq->errstr;
-			return 1;
-		}
-	}
+                   if($debug) {print STDERR "sprawdzam $hostname: "; }
+       my $utsfmt = "UNIX_TIMESTAMP()";
+       my $dbq1 = $dbase->prepare("SELECT name, lastreload, reload FROM hosts WHERE name LIKE UPPER('$hostname')");
+       $dbq1->execute();
+       while ( my $row1 = $dbq1->fetchrow_hashref()) {
+               if ( $row1->{'reload'} eq 0 ) {
+                   if($debug) {print STDERR "nie trzeba przeladowywac\n"; }
+                       return 0;
+               }
+               else {
+                   if($debug) {print STDERR "przeladowanie konieczne\n"; }
+                       my $sdbq = $dbase->prepare("UPDATE hosts SET reload=2, lastreload=$utsfmt  WHERE name LIKE UPPER('$hostname') and reload=1");
+                       $sdbq->execute() || die $sdbq->errstr;
+                       return 1;
+               }
+       }
 }
