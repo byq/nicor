@@ -1,16 +1,22 @@
 #!/usr/bin/perl
 
-#
-# do poprawnej pracy w LMS musza byc przepustowosci wpisane bez zaokraglania 
-# czyli 1024k, zamiast 1000k
-# MT zamienia przepustowosci z k na M i funkcja porownujaca nie dziala poprawnie
-#
+# programowanie MT z bazy LMS
+# 
 # testowane z 
 # RB750GL ver 6.4 i 6.20 oraz LMS 1.10.4
-# CCR ver 6.21 oraz LMS 1.11-git DB: 2014072500
+# CCR1009-8G-1S ver 6.21.1 oraz LMS 1.11-git DB: 2014072500
 #
-# dodac obsluge ip publ wpisanych w pole localnego
+# system/packages > wireless on
+# system/logging > error na disk
+# 
+# nazwa serwer DHCP (dawne pole domain) w LMS musi byc identyczna z nazwa server w MT
+# nazwa interfejs w LMS musi byc identyczna z nazwa interfejsu w MT (interfejsem moze byc vlan, bridge lub fizyczny)
 #
+# dodatkowe pole na IP w LMS jest uwzgledniane przy tworzeniu kolejek
+# 
+# Grzegorz Cichowski
+# gc@lanet.waw.pl gcichowski@gmail.com
+# 
 
 use strict;
 use DBI;
@@ -32,7 +38,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.15';
+my $_version = '2.1.16';
 
 my %options = (
 	"--debug|d"              =>     \$debug,
@@ -239,7 +245,7 @@ if ($Mtik::error_msg eq '' and $dhcp_enable) {
 if(!$quiet and $arp_enable) { print STDERR "Aktualnie dodane wpisy arp:\n---------------------------------------\n"; }
 my(%wireless_arp) = Mtik::get_by_key('/ip/arp/print','.id');
 
-#		print STDERR " error: $Mtik::error_msg\n";
+		print STDERR " error: $Mtik::error_msg\n";
 
 if ($Mtik::error_msg eq '' and $arp_enable) {
 		    print STDERR " arp enable\n"; 
@@ -494,7 +500,7 @@ foreach my $key (@networks) {
                                                 print "BLAD przy dodawaniu wpisu arp!! || "; 
 #						print " error: $Mtik::error_msg\n";
                                                 }
-                                        else { if (!$quiet) { print STDERR "OK(add_arp) || "; } }
+                                        else { if (!$quiet) { print STDERR "OK(add_arp) \n "; } }
                                 	}
 ####### arp ^
 
@@ -510,12 +516,19 @@ foreach my $key (@networks) {
 				    $ipaddr_32 = $ipaddr."/32,".$ipaddr_pub."/32";
 #				    print STDERR " ip: $ipaddr_ > ";
 				}
+				else {
+				    $ipaddr_ = $ipaddr;
+				    $ipaddr_32 = $ipaddr."/32";
+#				    print STDERR " ip: $ipaddr > ";
+#				    print STDERR " ip_32: $ipaddr_32 > ";
+				}
 
 				    # teraz musimy sprawdzic kolejke simple
 				    # jesli mamy taki wpis, to porownujemy wartosci
 ### queue dzien v
 				    if ( defined ($wireless_queues{$name_kolejka}{'name'}) ) {
 					if (!$quiet) { print STDERR "queue istnieje -> "; }
+#print STDERR " speed: $wireless_queues{$name_kolejka}{'target'}. $ipaddr . $ipaddr_32 ";
 					my %attrs5;
 					if ( $wireless_queues{$name_kolejka}{'max-limit'} ne $max_limit )   { $wireless_queues{$name_kolejka}{'max-limit'}=$max_limit;  $poprawic_wpis_simple+= 1;  $attrs5{'max-limit'} = $max_limit; }
 					if ( $wireless_queues{$name_kolejka}{'time'} ne $simple_time )      { $wireless_queues{$name_kolejka}{'time'}=$simple_time;     $poprawic_wpis_simple+= 8;  $attrs5{'time'} = $simple_time; }
@@ -562,7 +575,8 @@ my $w = $wireless_queues{$name_kolejka."_\$"}{'target'};
 #					if ( $w ne $ipaddr )  		{ $wireless_queues{$name_kolejka."_\$"}{'target'}=$ipaddr;  		$poprawic_wpis_simple_n+= 2;  $attrs11{'target'} = $ipaddr; }
 					if ( $wireless_queues{$name_kolejka."_\$"}{'time'} ne $simple_time_n )          { $wireless_queues{$name_kolejka."_\$"}{'time'}=$simple_time_n;         $poprawic_wpis_simple_n+= 8;  $attrs11{'time'} = $simple_time_n; }
 					if ( $poprawic_wpis_simple_n ) {
-						if (!$quiet) { print STDERR "queue_n jest do poprawy ($poprawic_wpis_simple_n ,$w,$ipaddr_32,): "; }
+						if (!$quiet) { print STDERR "queue_n jest do poprawy: "; }
+#						if (!$quiet) { print STDERR "($poprawic_wpis_simple_n ,$w,$ipaddr_32,): "; }
 				    		    $attrs11{'.id'}=$wireless_queues{$name_kolejka."_\$"}{'.id'};
 						    my($retval11,@results11)=Mtik::mtik_cmd('/queue/simple/set',\%attrs11);
 						    sleep ($api_delay);
@@ -620,7 +634,7 @@ my $w = $wireless_queues{$name_kolejka."_\$"}{'target'};
 		if ($dhcp_enable) {
                     foreach my $id (keys (%wireless_dhcp)) {
 # sprawdzenie, czy analizowany IP nalezy do sprawdzanej sieci, jezeli nie to nie usuwa go
-		    $ipjestwsieci = matchip($wireless_dhcp{$id}{'address'},$address,$mask);
+	    		$ipjestwsieci = matchip($wireless_dhcp{$id}{'address'},$address,$mask);
 #print STDERR "\n . $ipjestwsieci . net: $address maska: $mask . ip: $wireless_dhcp{$id}{'address'} \n";
                         if ($wireless_dhcp{$id}{'LMS'} < 1 and $ipjestwsieci) {
                                 print STDERR "uwaga dhcp: $wireless_dhcp{$id}{'LMS'} | ";
@@ -641,10 +655,10 @@ my $w = $wireless_queues{$name_kolejka."_\$"}{'target'};
 		if ($arp_enable) {
                     foreach my $id (keys (%wireless_arp)) {
 # sprawdzenie, czy analizowany IP nalezy do sprawdzanej sieci, jezeli nie to nie usuwa go
-		    $ipjestwsieci = matchip($wireless_arp{$id}{'address'},$address,$mask);
+			$ipjestwsieci = matchip($wireless_arp{$id}{'address'},$address,$mask);
 #print STDERR "\n . $ipjestwsieci . net: $address maska: $mask . ip: $wireless_arp{$id}{'address'} \n";
                         if ($wireless_arp{$id}{'LMS'} < 1 and $ipjestwsieci) {
-                                print STDERR "uwaga arp: $wireless_arp{$id}{'LMS'} | ";
+#                                print STDERR "uwaga arp: $wireless_arp{$id}{'LMS'} | ";
                                 print STDERR "usuwam zbedne arp: $wireless_arp{$id}{'mac-address'} -> ";
                                 my %attrs9; $attrs9{'.id'}=$wireless_arp{$id}{'.id'};
                                 my($retval9,@results9)=Mtik::mtik_cmd('/ip/arp/remove',\%attrs9);
@@ -659,25 +673,29 @@ my $w = $wireless_queues{$name_kolejka."_\$"}{'target'};
                     }
                 }
 
+# usuwamy kolejki ktore nie maja powiazania
+		if ($queue_enable) {
+		    foreach my $name_queues (keys (%wireless_queues)) {
+# sprawdzenie, czy analizowany IP nalezy do sprawdzanej sieci, jezeli nie to nie usuwa go
+		    $ipjestwsieci = matchip($wireless_queues{$name_queues}{'target'},$address,$mask);
+#print STDERR "\n . $ipjestwsieci . net: $address maska: $mask . ip: $wireless_queues{$name_queues}{'target'} \n";
+	# wykonujemy tylko raz na koniec
+			if ($wireless_queues{$name_queues}{'LMS'} < 1 and $ipjestwsieci) {
+			    print STDERR "usuwam zbedne kolejki ($name_queues) -> ";
+			    my %attrs7; $attrs7{'.id'}=$wireless_queues{$name_queues}{'.id'};
+			    my($retval7,@results7)=Mtik::mtik_cmd('/queue/simple/remove',\%attrs7);
+			    sleep ($api_delay);
+			    print STDERR "ret: $retval7 -> ";
+			    if ($retval7 == 1) {
+				if (!$quiet) { print "OK!(del_queue)\n"; } }
+			    else { print "BLAD!(del_queue)\n"; }
+			}
+		    }
+		}
+
 	} # end of while (my $row = $dbq->fetchrow_hashref()) {
 } # end of foreach my $key (@networks) {
 
-# usuwamy kolejki ktore nie maja powiazania
-if ($queue_enable) {
-    foreach my $name_queues (keys (%wireless_queues)) {
-	# wykonujemy tylko raz na koniec
-	if ($wireless_queues{$name_queues}{'LMS'} < 1 ) {
-		print STDERR "usuwam zbedne kolejki ($name_queues) -> ";
-		my %attrs7; $attrs7{'.id'}=$wireless_queues{$name_queues}{'.id'};
-		my($retval7,@results7)=Mtik::mtik_cmd('/queue/simple/remove',\%attrs7);
-		sleep ($api_delay);
-		print STDERR "ret: $retval7 -> ";
-		if ($retval7 == 1) {
-			if (!$quiet) { print "OK!(del_queue)\n"; } }
-		else { print "BLAD!(del_queue)\n"; }
-	}
-    }
-}
 
 
 
