@@ -3,8 +3,10 @@
 # programowanie MT z bazy LMS
 # 
 # testowane z 
-# RB750GL ver 6.4 i 6.20 oraz LMS 1.10.4
-# CCR1009-8G-1S ver 6.21.1 oraz LMS 1.11-git DB: 2014072500
+# RB750GL ver 6.4 i 6.20
+# CCR1009-8G-1S ver 6.21.1
+#
+# LMS 1.10.4, oraz LMS 1.11-git DB: 2014072500
 #
 # system/packages > wireless on
 # system/logging > error na disk
@@ -42,7 +44,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.26b';
+my $_version = '2.1.27a';
 
 my %options = (
 	"--debug|d"             =>     \$debug,
@@ -171,7 +173,6 @@ my $simple_limit_at= '0/0';
 my $simple_interface = 'all';
 my $simple_parent = 'none';
 my $simple_priority = '8';
-#my $simple_queue = 'default-small/default-small';
 my $simple_queue = 'wireless-default/wireless-default';
 my $simple_time = '12h-1d,sun,mon,tue,wed,thu,fri,sat';
 my $simple_time_n = '0s-12h,sun,mon,tue,wed,thu,fri,sat';
@@ -189,12 +190,7 @@ my(%wireless_dhcp);
 my(%wireless_arp);
 my(%wireless_bloklista);
 
-#domyslne ustawienia regulki dhcp-server lease
-
-#		print STDERR " test 1";
-
 if ( polacz_z_baza() ) {
-#		print STDERR " test 2";
 	open(FILE, "$mklistfile");
 	my @list = <FILE>;
 	close(FILE);
@@ -206,12 +202,10 @@ if ( polacz_z_baza() ) {
 		$mkuser = pop(@mkdata);
 		$mkhost = pop(@mkdata);
 		$hostname = pop(@mkdata);
-#		print STDERR " test 3";
 
 		if(sprawdz_zmiany() or $force) {
 			if(!$quiet) { print STDERR "Konieczne przeladowanie mk: $hostname, host: $mkhost, user: $mkuser, pass: *****\n"; }
 			if (Mtik::login($mkhost,$mkuser,$mkpass)) {
-#		print STDERR " test 4";
 
 
 if(!$quiet) { print STDERR "Zalogowano"; }
@@ -344,7 +338,6 @@ foreach my $key (@networks) {
 				my $name_kolejka = $row2->{'name'};
 				# budujemy opis, jesli zaczyna sie od prefixu LMS, to jest dodane przez skrypt
 				my $name = $aclprefix.':uid'.$ownerid.':nid'.$row2->{'id'}.':'.$row2->{'name'};
-#				my $name = $aclprefix.':uid'.$ownerid.':nid'.$row2->{'id'};
 				my $taryfa = taryfy($ownerid,$ipaddr);
 				# ustawiamy domyslna predkosc, nawet jak ktos nie ma taryfy, aby wyswietlaly sie strony serwisowe
 				my $down=$def_down;
@@ -356,7 +349,6 @@ foreach my $key (@networks) {
 				$dbq3->execute();
 
 # tutaj siorbnac z bazy predkosci wynikajace z PP
-#				my $wyciagtaryfy2 = $dbase->prepare("SELECT mbps4ref FROM assignments WHERE referrerid=$ownerid AND (datefrom <= $currtime OR datefrom = 0) AND (dateto > $currtime OR dateto = 0) AND mbps4ref > 0 AND suspended = 0");
 				my $wyciagtaryfy2 = $dbase->prepare("SELECT mbps4ref, mbps4refup FROM assignments WHERE referrerid=$ownerid AND (datefrom <= $currtime OR datefrom = 0) AND (dateto > $currtime OR dateto = 0) AND suspended = 0");
 				$wyciagtaryfy2->execute();
 #
@@ -370,7 +362,6 @@ foreach my $key (@networks) {
 
                    		while (my $rowwyciagtaryfy2 = $wyciagtaryfy2->fetchrow_hashref())
                    		{
-#                       		    my $tmpmbps4ref = lc($rowwyciagtaryfy2->{'mbps4ref'});
                     		    $row4refup = $rowwyciagtaryfy2->{'mbps4refup'};
                     		    $row4ref = $rowwyciagtaryfy2->{'mbps4ref'};
                     		    $tmpmbps4refup = lc($row4refup);
@@ -402,9 +393,6 @@ foreach my $key (@networks) {
 				}
 				my $max_limit= $up."000/".$down."000";
 				my $max_limit_n= $up_n."000/".$down_n."000";
-#print STDERR $max_limit_n;
-#				my $max_limit= $up."k/".$down."k";
-#				my $max_limit_n= $up_n."k/".$down_n."k";
 				if (!$quiet and $acl_enable) { print STDERR "$cmac @ $iface <-> "; }
 				# szukamy czy mamy juz zarejestrowany komputer na MT
 				my $zarejestrowany = 0 ;
@@ -598,7 +586,6 @@ foreach my $key (@networks) {
 					my %attrs3; 
 					$attrs3{'address'} = $ipaddr; 
 					$attrs3{'mac-address'} = $cmac; 
-#					$attrs3{'comment'} = $name.":podstawowy";
 					$attrs3{'comment'} = $name;
 					$attrs3{'interface'} = $iface; 
 					my($retval3,@results3)=Mtik::mtik_cmd('/ip/arp/add',\%attrs3);
@@ -680,21 +667,6 @@ foreach my $key (@networks) {
 
                                 	} #endof if (!$dopisany and $arp_enable)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ####### queue v
 				if ($queue_enable) {
 				    my $poprawic_wpis_simple=0;
@@ -702,16 +674,12 @@ foreach my $key (@networks) {
 
 				if ($ipaddr_pub ne "0.0.0.0") 
 				{ 
-#				    print STDERR " loc + pub > ";
 				    $ipaddr_ = $ipaddr.", ".$ipaddr_pub;
 				    $ipaddr_32 = $ipaddr."/32,".$ipaddr_pub."/32";
-#				    print STDERR " ip: $ipaddr_ > ";
 				}
 				else {
 				    $ipaddr_ = $ipaddr;
 				    $ipaddr_32 = $ipaddr."/32";
-#				    print STDERR " ip: $ipaddr > ";
-#				    print STDERR " ip_32: $ipaddr_32 > ";
 				}
 
 				    # teraz musimy sprawdzic kolejke simple
@@ -752,14 +720,12 @@ foreach my $key (@networks) {
 				    if ( defined ($wireless_queues{$name_kolejka."_\$"}{'name'}) ) {
 					if (!$quiet) { print STDERR "queue_n istnieje -> "; }
 					my %attrs11;
-#					my $w = $wireless_queues{$name_kolejka."_\$"}{'target'};
 					if ( $wireless_queues{$name_kolejka."_\$"}{'max-limit'} ne $max_limit_n )       { $wireless_queues{$name_kolejka."_\$"}{'max-limit'}=$max_limit_n;      $poprawic_wpis_simple_n+= 1;  $attrs11{'max-limit'} = $max_limit_n; }
 					if ( $wireless_queues{$name_kolejka."_\$"}{'target'} ne $ipaddr_32 )  		{ $wireless_queues{$name_kolejka."_\$"}{'target'}=$ipaddr_32;  		$poprawic_wpis_simple_n+= 2;  $attrs11{'target'} = $ipaddr_32; }
 					if ( $wireless_queues{$name_kolejka."_\$"}{'time'} ne $simple_time_n )          { $wireless_queues{$name_kolejka."_\$"}{'time'}=$simple_time_n;         $poprawic_wpis_simple_n+= 4;  $attrs11{'time'} = $simple_time_n; }
 					if ( $poprawic_wpis_simple_n ) {
 						if (!$quiet) { print STDERR "queue_n jest do poprawy: "; }
 						if ($info) { print STDERR "queue_n jest do poprawy: "; }
-#						if (!$quiet) { print STDERR "($poprawic_wpis_simple_n ,$w,$ipaddr_32,): "; }
 				    		    $attrs11{'.id'}=$wireless_queues{$name_kolejka."_\$"}{'.id'};
 						    my($retval11,@results11)=Mtik::mtik_cmd('/queue/simple/set',\%attrs11);
 						    sleep ($api_delay);
@@ -895,15 +861,8 @@ foreach my $key (@networks) {
                     }
                 }
 
-
-
-
-
 	} # end of while (my $row = $dbq->fetchrow_hashref()) {
 } # end of foreach my $key (@networks) {
-
-
-
 
 				Mtik::logout;
 			} # end of if (Mtik::login($mkhost,$mkuser,$mkpass)) {
