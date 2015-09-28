@@ -1,7 +1,9 @@
 #!/usr/bin/perl
 
 # programowanie MT z bazy LMS
-# 
+#
+# org: http://lists.lms.org.pl/pipermail/lms/attachments/20100308/def9d726/attachment-0001.ksh 
+#
 # testowane z 
 # RB750GL ver 6.4 i 6.20
 # CCR1009-8G-1S ver 6.21.1
@@ -44,7 +46,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.27a';
+my $_version = '2.1.28a';
 
 my %options = (
 	"--debug|d"             =>     \$debug,
@@ -64,7 +66,7 @@ if($help) {
 	print STDERR <<EOF;
 mikrotik, version $_version
 (C) 2001-2006 LMS Developers
-(C) 2009-20xx Emers, Wojtek
+(C) 2009-2010 Emers, Wojtek
 (C) 2014-20xx byq
 
 -C, --config-file=/etc/lms-nett/lms.ini	alternate config file (default: /etc/lms-nett/lms.ini);
@@ -83,7 +85,7 @@ if($version) {
 	print STDERR <<EOF;
 mikrotik, version $_version
 (C) 2001-2006 LMS Developers
-(C) 2009-20xx Emers, Wojtek
+(C) 2009-2010 Emers, Wojtek
 (C) 2013-20xx byq
 
 EOF
@@ -101,7 +103,7 @@ if(!$mklistfile) {
 if($version) {
 	print STDOUT "mikrotik, version $_version\n";
 	print STDOUT "(C) Copyright 2001-2006 LMS Developers\n";
-	print STDOUT "(C) Copyright 2009-20xx Emers\n";
+	print STDOUT "(C) Copyright 2009-2010 Emers\n";
 	print STDOUT "(C) Copyright 2013-20xx byq\n";
 	print STDOUT "Using file $configfile as config.\n";
 	print STDOUT "Using file $mklistfile as mikrotik's list.\n";
