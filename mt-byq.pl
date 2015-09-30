@@ -6,7 +6,7 @@
 #
 # testowane z 
 # RB750GL ver 6.4 i 6.20
-# CCR1009-8G-1S ver 6.21.1
+# CCR1009-8G-1S ver 6.21.1-6.29.1
 #
 # LMS 1.10.4, oraz LMS 1.11-git DB: 2014072500
 #
@@ -21,10 +21,10 @@
 # by dzialalo pppoe nalezy dodac PPPoE Server na kazdym interfejsie
 # 
 #
-# dodatkowe pole na IP w LMS jest uwzgledniane tylko przy tworzeniu kolejek - nie w arp
+# dodatkowe pole na IP w LMS jest uwzgledniane tylko przy tworzeniu kolejek oraz remote-addr w pppoe - nie w arp, nie w dhcp
 # 
 # Grzegorz Cichowski
-# gc@lanet.waw.pl gcichowski@gmail.com
+# gc@lanet.waw.pl, gcichowski@gmail.com
 # 
 
 use strict;
@@ -47,7 +47,7 @@ sub taryfy($$);
 sub polacz_z_baza();
 sub sprawdz_zmiany();
 
-my $_version = '2.1.28a';
+my $_version = '2.1.28b';
 
 my %options = (
 	"--debug|d"             =>     \$debug,
@@ -326,8 +326,14 @@ if ($pppoe_enable) {
 		if(!$quiet) { print STDERR " ID: $id |"; }
 		# zaznaczamy domyslnie kazdy wpis do usuniecia
 		$_=$wireless_pppoe{$id}{'list'};
-		if (/$pppoe_usunac/) { $wireless_pppoe{$id}{'LMS'} = '2'; }
-		else { $wireless_pppoe{$id}{'LMS'} = '0'; }
+		if (/$pppoe_usunac/) { 
+		    $wireless_pppoe{$id}{'LMS'} = '2'; 
+#		    print STDERR " 0 |$wireless_pppoe{$id}{'comment'}"; 
+		}
+		else { 
+		    $wireless_pppoe{$id}{'LMS'} = '0'; 
+#		    print STDERR " 0 |$wireless_pppoe{$id}{'comment'}"; 
+		}
 		print STDERR " u: $wireless_pppoe{$id}{'LMS'} |"; 
 	}
     }
@@ -685,6 +691,8 @@ foreach my $key (@networks) {
 					$attrs19{'password'} = $passwd; 
 					$attrs19{'name'} = $name_kolejka;
 					$attrs19{'remote-address'} = $ipaddr_pub; 
+					$attrs19{'service'} = $pppoe_service; 
+					$attrs19{'profile'} = $pppoe_profile; 
 					my($retval19,@results19)=Mtik::mtik_cmd('/ppp/secret/add',\%attrs19);
                                         sleep ($api_delay);
                                         print STDERR "ret: $retval19 -> ";
@@ -694,7 +702,7 @@ foreach my $key (@networks) {
                                         else { if (!$quiet) { print STDERR "OK(add_pppoe) "; } }
 				}
 
-                                	} #endof if (!$dopisany and $arp_enable)
+                                	} #endof if (!$dopisany and $pppoe_enable)
 ####### pppoe ^
 ###
 
@@ -803,8 +811,20 @@ foreach my $key (@networks) {
 				    }
 				    else {
 					my %attrs1; 
-					    $attrs1{'name'} = $name_kolejka; $attrs1{'target'} = $ipaddr_; $attrs1{'max-limit'} = $max_limit; $attrs1{'burst-limit'} = $simple_burst_limit; $attrs1{'burst-threshold'} = $simple_burst_threshold; $attrs1{'burst-time'} = $simple_burst_time; $attrs1{'disabled'} = $simple_disable; 
-					$attrs1{'dst'} = $simple_dst_address; $attrs1{'limit-at'} = $simple_limit_at; $attrs1{'parent'} = $simple_parent; $attrs1{'priority'} = $simple_priority; $attrs1{'queue'} = $simple_queue; $attrs1{'time'} = $simple_time; $attrs1{'total-queue'} = $simple_total_queue;
+					$attrs1{'name'} = $name_kolejka; 
+					$attrs1{'target'} = $ipaddr_; 
+					$attrs1{'max-limit'} = $max_limit; 
+					$attrs1{'burst-limit'} = $simple_burst_limit; 
+					$attrs1{'burst-threshold'} = $simple_burst_threshold; 
+					$attrs1{'burst-time'} = $simple_burst_time; 
+					$attrs1{'disabled'} = $simple_disable; 
+					$attrs1{'dst'} = $simple_dst_address; 
+					$attrs1{'limit-at'} = $simple_limit_at; 
+					$attrs1{'parent'} = $simple_parent; 
+					$attrs1{'priority'} = $simple_priority; 
+					$attrs1{'queue'} = $simple_queue; 
+					$attrs1{'time'} = $simple_time; 
+					$attrs1{'total-queue'} = $simple_total_queue;
 					my($retval1,@results1)=Mtik::mtik_cmd('/queue/simple/add',\%attrs1);
 					sleep ($api_delay);
 					print STDERR "ret: $retval1 -> ";
