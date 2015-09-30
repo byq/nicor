@@ -18,6 +18,7 @@
 # aby wlaczyc autoryzacje po mac nalezy dla danego interface w MT ustawic ARP: reply-only
 # by dzialal range dhcp dla nowych nalezy zaznaczyc w dhcp serwer na mt add-arp
 # by dzialaly komunikaty nowykomp i blokada nalezy w mt dodac reguly firewall na forward i dstnat oraz dodac address list na range dhcp i dodac pool
+# by dzialalo pppoe nalezy dodac PPPoE Server na kazdym interfejsie
 # 
 #
 # dodatkowe pole na IP w LMS jest uwzgledniane tylko przy tworzeniu kolejek - nie w arp
@@ -152,6 +153,7 @@ my $queue_enable=1; 	# czy zarzadzac kolejkami
 my $dhcp_enable=1;	# czy zarzadzac dhcp
 my $arp_enable=1;	# czy zarzadzac arp
 my $bloklista_enable=1;	# czy zarzadzac bloklista w firewallu
+my $pppoe_enable=1;	# czy zarzadzac uzytkownikami pppoe
 
 #domyslne ustawienia regulki interface wireless access-list
 my $macs_private_algo='none';
@@ -180,6 +182,11 @@ my $simple_time = '12h-1d,sun,mon,tue,wed,thu,fri,sat';
 my $simple_time_n = '0s-12h,sun,mon,tue,wed,thu,fri,sat';
 my $simple_total_queue = 'default-small';
 
+#domyslne ustawienia regulki pppoe
+my $pppoe_service='pppoe';
+my $pppoe_profile='default-encryption';
+my $pppoe_usunac='do_pominiecia-';	# testy
+
 # nazwa listy z blokowanymi IP
 my $bloklista_nazwalisty = 'blokada';
 
@@ -190,6 +197,7 @@ my(%wireless_macs);
 my(%wireless_queues);
 my(%wireless_dhcp);
 my(%wireless_arp);
+my(%wireless_pppoe);
 my(%wireless_bloklista);
 
 if ( polacz_z_baza() ) {
@@ -308,6 +316,23 @@ if ($bloklista_enable) {
     }
 }
 
+if ($pppoe_enable) {
+    if (!$quiet) { print STDERR "\n\nAktualnie dodane wpisy do pppoe:\n---------------------------------------\n"; }
+    %wireless_pppoe = Mtik::get_by_key('/ppp/secret/print','.id');
+#    print STDERR " error: $Mtik::error_msg\n";
+    if ($Mtik::error_msg eq '' ) {
+#		    print STDERR " pppoe enable\n"; 
+	foreach my $id (keys (%wireless_pppoe)) {
+		if(!$quiet) { print STDERR " ID: $id |"; }
+		# zaznaczamy domyslnie kazdy wpis do usuniecia
+		$_=$wireless_pppoe{$id}{'list'};
+		if (/$pppoe_usunac/) { $wireless_pppoe{$id}{'LMS'} = '2'; }
+		else { $wireless_pppoe{$id}{'LMS'} = '0'; }
+		print STDERR " u: $wireless_pppoe{$id}{'LMS'} |"; 
+	}
+    }
+}
+
 if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable or $bloklista_enable)) { print STDERR "\n";}
 my @networks = split ' ', $mknetl;
 foreach my $key (@networks) {
@@ -317,7 +342,7 @@ foreach my $key (@networks) {
 	if(!$quiet and ( $acl_enable or $queue_enable or $dhcp_enable or $arp_enable ) ) { print STDERR "\nSprawdzam siec: $key\n";}
 	while (my $row = $dbq->fetchrow_hashref()) {
 # pobranie komputerow z bazy
-		my $dbq2 = $dbase->prepare("SELECT id, name, ipaddr, ipaddr_pub, mac, ownerid, access FROM vnodes WHERE name not like '%$macs_usunac%' ORDER BY ipaddr ASC");
+		my $dbq2 = $dbase->prepare("SELECT id, name, ipaddr, ipaddr_pub, mac, ownerid, passwd, access FROM vnodes WHERE name not like '%$macs_usunac%' ORDER BY ipaddr ASC");
 		$dbq2->execute();
 		my $iface = $row->{'interface'}; # nazwa interfejsu na MT przechowywana jest w polu interface w konfiguracji konkretnej sieci
 		my $server = $row->{'domain'}; # nazwa servera dhcp na MT przechowywana jest w polu domain w konfiguracji konkretnej sieci
@@ -332,6 +357,7 @@ foreach my $key (@networks) {
 				my $ipaddr = $row2->{'ipaddr'};
 				my $ipaddr_pub = $row2->{'ipaddr_pub'};
 				my $cmac = $row2->{'mac'};
+				my $passwd = $row2->{'passwd'};
 				my $access = $row2->{'access'};
 #                            print STDERR " ip: $ipaddr  ";
 				my $ownerid = $row2->{'ownerid'};
@@ -605,7 +631,76 @@ foreach my $key (@networks) {
 
 
 
+###
+####### pppoe v
+# tworzenie listy login,haslo,ip_loc,ip_rem dla pppoe
+				my $dopisany = 0;
+				if ($pppoe_enable) {
+                                    my $poprawic_wpis_pppoe=0;
+				    foreach my $id (keys (%wireless_pppoe)) {
+                                        if ($wireless_pppoe{$id}{'name'} eq $name_kolejka ) {
+#                                        print "$wireless_pppoe{$id}{'password'} | $passwd";
+                                                if (!$quiet) { print STDERR "ppoe istnieje -> "; }
+                                                $dopisany=1;
+                                                my $poprawic_wpis_pppoe=0;
+                                                my %attrs18;
+                                                # jesli juz dodany, to trzeba sprawdzic wszystkie atrybuty i ewentualnie poprawic
+                                                if ( $wireless_pppoe{$id}{'password'} ne $passwd )		{ $wireless_pppoe{$id}{'password'}=$passwd;		$poprawic_wpis_pppoe+= 1;	 $attrs18{'password'}=$passwd; }
+						if ( $wireless_pppoe{$id}{'local-address'} ne $ipaddr )		{ $wireless_pppoe{$id}{'local-address'}=$ipaddr;	$poprawic_wpis_pppoe+= 2;	 $attrs18{'local-address'}=$ipaddr; }
+						if ( $wireless_pppoe{$id}{'remote-address'} ne $ipaddr_pub )	{ $wireless_pppoe{$id}{'remote-address'}=$ipaddr_pub;	$poprawic_wpis_pppoe+= 4;	 $attrs18{'remote-address'}=$ipaddr_pub; }
+                                                if ( $poprawic_wpis_pppoe and $wireless_pppoe{$id}{'LMS'} < 2 ) {
+                                                        if (!$quiet) { print STDERR "pppoe jest do poprawy ($poprawic_wpis_pppoe) -> "; }
+                                                        if ($info) { print STDERR "pppoe jest do poprawy ($poprawic_wpis_pppoe) -> "; }
+                                                        $attrs18{'.id'} = $id;
+                                                        # przed zapisaniem zmian wpis ma byc disabled, a na koniec enabled by ominac error
+                                                        $attrs18{'disabled'} = 'yes';
+                                                        my($retval18,@results18)=Mtik::mtik_cmd('/ppp/secret/set',\%attrs18);
+                                                        sleep ($api_delay);
+                                                        print STDERR "ret: $retval18 -> ";
+                                                        if ($retval18 != 1) {
+                                                                print STDERR "BLAD przy zmianie wpisu pppoe! pewno jest juz taki|| "; }
+                                                        else { if (!$quiet) { print STDERR "OK(set_pppoe) || "; } }
+						# enable dla edytowanego wpisu
+                                                        $attrs18{'disabled'} = 'no';
+							my($retval18,@results18)=Mtik::mtik_cmd('/ppp/secret/set',\%attrs18);
+							# kasujemy disabled zakonczony errorem
+							my %attrs20;
+							$attrs20{'.id'} = $id;
+							if ($Mtik::error_msg) { Mtik::mtik_cmd('/ppp/secret/remove',\%attrs20 ) ;}
+                                                } # koniec poprawiania wpisow
+                                                else { if (!$quiet) { print STDERR "OK || "; } }
+                                                $wireless_pppoe{$id}{'LMS'} = 1;
+
+                                        } # end of if ( ($wireless_pppoe{$id}{'name'} eq $name_kolejka )
+                                    } # end of foreach my $id (keys (%wireless_pppoe)) 
+				    }
+## jezeli nie ma takiego wpisu to trzeba go dodac:
+				    if (!$dopisany and $pppoe_enable) {
+## pppoe tylko dla ip_pub:
+				if ($ipaddr_pub ne "0.0.0.0") 
+				{ 
+                                        print STDERR "brak pppoe, dodaje -> ";
+					my %attrs19; 
+					$attrs19{'local-address'} = $ipaddr; 
+					$attrs19{'password'} = $passwd; 
+					$attrs19{'name'} = $name_kolejka;
+					$attrs19{'remote-address'} = $ipaddr_pub; 
+					my($retval19,@results19)=Mtik::mtik_cmd('/ppp/secret/add',\%attrs19);
+                                        sleep ($api_delay);
+                                        print STDERR "ret: $retval19 -> ";
+                                        if ($retval19 != 1) {
+                                                print "BLAD przy dodawaniu wpisu pppoe!! || "; 
+                                                }
+                                        else { if (!$quiet) { print STDERR "OK(add_pppoe) "; } }
+				}
+
+                                	} #endof if (!$dopisany and $arp_enable)
+####### pppoe ^
+###
+
+
 ####### bloklista v
+# fixit
 # zapetlic trzeba by dodawane byly ipki z dodatkowego pola
 # ew. dodatkowy ip traktowany wspolnie razem z podstawowym
 # tylko jak to sie zachowa przy weryfikacji istniejacych?
@@ -841,7 +936,7 @@ foreach my $key (@networks) {
 		}
 
 
-
+## nie dziala - fixit:
 		if ($bloklista_enable) {
                     foreach my $id (keys (%wireless_bloklista)) {
 # sprawdzenie, czy analizowany IP nalezy do sprawdzanej sieci, jezeli nie to nie usuwa go
